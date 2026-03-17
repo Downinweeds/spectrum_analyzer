@@ -1,78 +1,142 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Spectrum Analyzer</title>
-<style>
-  body {
-    margin: 0;
-    background: black;
-    overflow: hidden;
-  }
-  canvas {
-    display: block;
-  }
-</style>
-</head>
-<body>
-<canvas id="canvas"></canvas>
+  <!-- Makes it scale correctly on iPhone -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<script>
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+  <title>Spectrum Analyzer</title>
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener("resize", resize);
-
-async function start() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = audioCtx.createMediaStreamSource(stream);
-
-  const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
-
-  source.connect(analyser);
-
-  const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
-
-  function draw() {
-    requestAnimationFrame(draw);
-
-    analyser.getByteFrequencyData(dataArray);
-
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    
-    const barWidth = canvas.width / bufferLength;
-
-    for (let i = 0; i < bufferLength; i++) {
-      const value = dataArray[i];
-      const height = value * 1.5;
-
-      ctx.fillStyle = "lime";
-      ctx.fillRect(
-        i * barWidth,
-        canvas.height - height,
-        barWidth - 1,
-        height
-      );
+  <style>
+    /* Remove default margins and set black background */
+    body {
+      margin: 0;
+      background: black;
+      overflow: hidden;
     }
-  }
 
-  draw();
-}
+    /* Canvas fills the screen */
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
 
-// iOS requires user interaction first
-document.body.addEventListener("click", start, { once: true });
-</script>
+<body>
+
+  <!-- This canvas is where we draw the spectrum -->
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // ===== GET CANVAS =====
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    // ===== HANDLE SCREEN SIZE =====
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    resize();
+    window.addEventListener("resize", resize);
+
+    // ===== MAIN FUNCTION (starts audio) =====
+    async function start() {
+
+      // Ask for microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Create audio processing context
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Connect microphone to audio system
+      const source = audioCtx.createMediaStreamSource(stream);
+
+      // Create analyzer node (this does the FFT for us)
+      const analyser = audioCtx.createAnalyser();
+
+      // FFT size (must be power of 2)
+      analyser.fftSize = 512;
+
+      // Smooths the motion (less jitter)
+      analyser.smoothingTimeConstant = 0.8;
+
+      // Connect mic → analyzer
+      source.connect(analyser);
+
+      // Number of frequency bins (half of fftSize)
+      const bufferLength = analyser.frequencyBinCount;
+
+      // Array to hold frequency data (0–255 values)
+      const dataArray = new Uint8Array(bufferLength);
+
+      // ===== DRAW LOOP (like Arduino loop) =====
+      function draw() {
+
+        // Repeat forever
+        requestAnimationFrame(draw);
+
+        // Get frequency data from mic
+        analyser.getByteFrequencyData(dataArray);
+
+        // Clear screen
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // ===== DRAW BASELINE =====
+        ctx.strokeStyle = "white";
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height - 1);
+        ctx.lineTo(canvas.width, canvas.height - 1);
+        ctx.stroke();
+
+        // ===== GROUP INTO BARS =====
+        const bars = 32; // number of visible bars
+        const step = Math.floor(bufferLength / bars);
+
+        for (let i = 0; i < bars; i++) {
+
+          // Average multiple frequency bins into one bar
+          let sum = 0;
+          for (let j = 0; j < step; j++) {
+            sum += dataArray[i * step + j];
+          }
+
+          let value = sum / step;
+
+          // ===== NOISE FLOOR =====
+          // Ignore very small values (background noise)
+          if (value < 10) value = 0;
+
+          // ===== LOG SCALE =====
+          // Makes display more natural (like human hearing)
+          const height = Math.log10(value + 1) * 60;
+
+          // ===== COLOR =====
+          // Rainbow color across spectrum
+          ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+
+          // ===== DRAW BAR =====
+          ctx.fillRect(
+            i * (canvas.width / bars),             // x position
+            canvas.height - height,                // y position (bottom aligned)
+            (canvas.width / bars) - 2,             // width
+            height                                // height
+          );
+        }
+      }
+
+      // Start drawing
+      draw();
+    }
+
+    // ===== REQUIRED FOR iPHONE =====
+    // iOS requires user interaction before audio starts
+    document.body.addEventListener("click", start, { once: true });
+
+  </script>
 
 </body>
+
 </html>
