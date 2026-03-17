@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectrum Analyzer</title>
+<style>
+  body {
+    margin: 0;
+    background: black;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+async function start() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+
+  source.connect(analyser);
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  function draw() {
+    requestAnimationFrame(draw);
+
+    analyser.getByteFrequencyData(dataArray);
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const barWidth = canvas.width / bufferLength;
+
+    for (let i = 0; i < bufferLength; i++) {
+      const value = dataArray[i];
+      const height = value * 1.5;
+
+      ctx.fillStyle = "lime";
+      ctx.fillRect(
+        i * barWidth,
+        canvas.height - height,
+        barWidth - 1,
+        height
+      );
+    }
+  }
+
+  draw();
+}
+
+// iOS requires user interaction first
+document.body.addEventListener("click", start, { once: true });
+</script>
+
+</body>
+</html>
