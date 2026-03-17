@@ -49,7 +49,14 @@ async function start() {
 
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+    
+<!added to draw baseline>
+    ctx.strokeStyle = "white";
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height - 1);
+    ctx.lineTo(canvas.width, canvas.height - 1);
+    ctx.stroke();
+    
     const barWidth = canvas.width / bufferLength;
 
     for (let i = 0; i < bufferLength; i++) {
