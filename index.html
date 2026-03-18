@@ -1,32 +1,29 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Spectrum Analyzer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectrum Analyzer</title>
 
-  <style>
-    body {
-      margin: 0;
-      background: black;
-      overflow: hidden;
-    }
-
-    canvas {
-      display: block;
-    }
-  </style>
+<style>
+body {
+  margin: 0;
+  background: black;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+}
+</style>
 </head>
 
 <body>
-
 <canvas id="canvas"></canvas>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// ===== MOBILE-SAFE RESIZE =====
+// resize (mobile-safe)
 function resize() {
   const height = window.visualViewport
     ? window.visualViewport.height
@@ -35,15 +32,13 @@ function resize() {
   canvas.width = window.innerWidth;
   canvas.height = height;
 }
-
 resize();
 window.addEventListener("resize", resize);
-
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", resize);
 }
 
-// ===== START AUDIO =====
+// start audio
 async function start() {
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -57,112 +52,4 @@ async function start() {
 
   source.connect(analyser);
 
-  const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
-
-  // dB range
-  const minDb = -80;
-  const maxDb = 0;
-
-  function draw() {
-    requestAnimationFrame(draw);
-
-    analyser.getByteFrequencyData(dataArray);
-
-    // clear screen
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // ===== BASELINE =====
-    const baselineY = canvas.height - 25;
-
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = 2;
-
-    ctx.beginPath();
-    ctx.moveTo(0, baselineY);
-    ctx.lineTo(canvas.width, baselineY);
-    ctx.stroke();
-
-    // ===== dB SCALE =====
-    ctx.fillStyle = "white";
-    ctx.font = "12px monospace";
-
-    for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
-      const normalized = (dbMark - minDb) / (maxDb - minDb);
-      const y = baselineY - normalized * (canvas.height * 0.8);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.3)";
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(20, y);
-      ctx.stroke();
-
-      ctx.fillText(dbMark + " dB", 25, y + 4);
-    }
-
-    // ===== BARS =====
- // ===== PEAK HOLD STORAGE =====
-if (!window.peakArray) {
-  window.peakArray = new Array(bars).fill(0);
-}
-
-for (let i = 0; i < bars; i++) {
-
-  // average bins
-  let sum = 0;
-  for (let j = 0; j < step; j++) {
-    sum += dataArray[i * step + j];
-  }
-
-  let value = sum / step;
-
-  // boost signal
-  value = value * 3;
-
-  // visual dB scaling (stable)
-  let db = 20 * Math.log10(value + 1);
-
-  db = Math.max(0, Math.min(50, db));
-
-  let normalized = db / 50;
-
-  const height = normalized * (canvas.height * 0.8);
-
-  // ===== BAR POSITIONING (FULL WIDTH) =====
-  const barWidth = canvas.width / bars;
-  const x = i * barWidth;
-
-  // ===== DRAW BAR =====
-  ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
-
-  ctx.fillRect(
-    x,
-    baselineY - height,
-    barWidth - 2,
-    height
-  );
-
-  // ===== PEAK HOLD =====
-  if (height > window.peakArray[i]) {
-    window.peakArray[i] = height; // new peak
-  } else {
-    window.peakArray[i] *= 0.95; // slow decay
-  }
-
-  // draw peak line
-  ctx.fillStyle = "white";
-  ctx.fillRect(
-    x,
-    baselineY - window.peakArray[i] - 2,
-    barWidth - 2,
-    3
-  );
-}
-// required for iPhone
-document.body.addEventListener("click", start, { once: true });
-
-</script>
-
-</body>
-</html>
+ 
