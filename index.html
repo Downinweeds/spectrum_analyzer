@@ -2,20 +2,16 @@
 <html>
 
 <head>
-  <!-- Makes it scale correctly on iPhone -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>Spectrum Analyzer</title>
 
   <style>
-    /* Remove default margins and set black background */
     body {
       margin: 0;
       background: black;
       overflow: hidden;
     }
 
-    /* Canvas fills the screen */
     canvas {
       display: block;
     }
@@ -24,149 +20,140 @@
 
 <body>
 
-  <!-- This canvas is where we draw the spectrum -->
-  <canvas id="canvas"></canvas>
+<canvas id="canvas"></canvas>
 
-  <script>
-    // ===== GET CANVAS =====
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-    // ===== HANDLE SCREEN SIZE =====
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+// ===== MOBILE-SAFE RESIZE =====
+function resize() {
+  const height = window.visualViewport
+    ? window.visualViewport.height
+    : window.innerHeight;
+
+  canvas.width = window.innerWidth;
+  canvas.height = height;
+}
+
+resize();
+window.addEventListener("resize", resize);
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", resize);
+}
+
+// ===== START AUDIO =====
+async function start() {
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.8;
+
+  source.connect(analyser);
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  // dB range
+  const minDb = -80;
+  const maxDb = 0;
+
+  function draw() {
+    requestAnimationFrame(draw);
+
+    analyser.getByteFrequencyData(dataArray);
+
+    // clear screen
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // ===== BASELINE =====
+    const baselineY = canvas.height - 25;
+
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    ctx.moveTo(0, baselineY);
+    ctx.lineTo(canvas.width, baselineY);
+    ctx.stroke();
+
+    // ===== dB SCALE =====
+    ctx.fillStyle = "white";
+    ctx.font = "12px monospace";
+
+    for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
+      const normalized = (dbMark - minDb) / (maxDb - minDb);
+      const y = baselineY - normalized * (canvas.height * 0.8);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(20, y);
+      ctx.stroke();
+
+      ctx.fillText(dbMark + " dB", 25, y + 4);
     }
 
-    resize();
-    window.addEventListener("resize", resize);
+    // ===== BARS =====
+    const bars = 32;
+    const step = Math.floor(bufferLength / bars);
 
-    // ===== MAIN FUNCTION (starts audio) =====
-    async function start() {
+    for (let i = 0; i < bars; i++) {
 
-      // Ask for microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Create audio processing context
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-      // Connect microphone to audio system
-      const source = audioCtx.createMediaStreamSource(stream);
-
-      // Create analyzer node (this does the FFT for us)
-      const analyser = audioCtx.createAnalyser();
-
-      // FFT size (must be power of 2)
-      analyser.fftSize = 512;
-
-      // Smooths the motion (less jitter)
-      analyser.smoothingTimeConstant = 0.8;
-
-      // Connect mic → analyzer
-      source.connect(analyser);
-
-      // Number of frequency bins (half of fftSize)
-      const bufferLength = analyser.frequencyBinCount;
-
-      // Array to hold frequency data (0–255 values)
-      const dataArray = new Uint8Array(bufferLength);
-
-      // ===== DRAW LOOP (like Arduino loop) =====
-      function draw() {
-
-        // Repeat forever
-        requestAnimationFrame(draw);
-
-        // Get frequency data from mic
-        analyser.getByteFrequencyData(dataArray);
-
-        // Clear screen
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // ===== DRAW BASELINE (make it thicker + brighter) =====
-        const baselineY = canvas.height - 25; // lift it up
-
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 2;
-
-        ctx.beginPath();
-        ctx.moveTo(0, baselineY);
-        ctx.lineTo(canvas.width, baselineY);
-        ctx.stroke();
-        // ===== DRAW dB SCALE =====
-ctx.fillStyle = "white";
-ctx.font = "12px monospace";
-
-for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
-  const y = canvas.height - ((dbMark - minDb) / (maxDb - minDb)) * (canvas.height * 0.8);
-
-  ctx.strokeStyle = "rgba(255,255,255,0.3)";
-  ctx.beginPath();
-  ctx.moveTo(0, y);
-  ctx.lineTo(20, y);
-  ctx.stroke();
-
-  ctx.fillText(dbMark + " dB", 25, y + 4);
-}
-        // ===== GROUP INTO BARS =====
-        const bars = 32; // number of visible bars
-        const step = Math.floor(bufferLength / bars);
-
-        for (let i = 0; i < bars; i++) {
-const minDb = -80;
-const maxDb = 0;
-          // Average multiple frequency bins into one bar
-          let sum = 0;
-          for (let j = 0; j < step; j++) {
-            sum += dataArray[i * step + j];
-          }
-
-          let value = sum / step;
-
-          // Convert to dB
-          value = Math.max(value, 1); // prevent log(0)
-value = Math.max(value, 1); // avoid log(0)
-
-let db = 20 * Math.log10(value / 255);
-
-// clamp to visible range
-db = Math.max(-80, Math.min(0, db));
-
-          // ===== NOISE FLOOR =====
-          // Ignore very small values (background noise)
-          if (value < 10) value = 0;
-
-          // ===== LOG SCALE =====
-          // Makes display more natural (like human hearing)
-
-          const normalized = (db - minDb) / (maxDb - minDb);
-          const height = Math.max(0, normalized) * (canvas.height * 0.8);
-
-          // ===== COLOR =====
-          // Rainbow color across spectrum
-          ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
-
-          // ===== DRAW BAR =====
-          ctx.fillRect(
-          i * (canvas.width / bars),
-          baselineY - height,   // start from baseline
-          (canvas.width / bars) - 2,
-          height
-          );
-        }
+      // average bins
+      let sum = 0;
+      for (let j = 0; j < step; j++) {
+        sum += dataArray[i * step + j];
       }
 
-      // Start drawing
-      draw();
+      let value = sum / step;
+
+      // boost weak signal
+      value = value * 2;
+
+      // prevent log(0)
+      value = Math.max(value, 1);
+
+      // convert to dB
+      let db = 20 * Math.log10(value / 255);
+
+      // clamp dB
+      db = Math.max(minDb, Math.min(maxDb, db));
+
+      // normalize
+      let normalized = (db - minDb) / (maxDb - minDb);
+      normalized = Math.max(0, Math.min(1, normalized));
+
+      // height
+      const height = normalized * (canvas.height * 0.8);
+
+      // color
+      ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+
+      // draw bar
+      ctx.fillRect(
+        i * (canvas.width / bars),
+        baselineY - height,
+        (canvas.width / bars) - 2,
+        height
+      );
     }
+  }
 
-    // ===== REQUIRED FOR iPHONE =====
-    // iOS requires user interaction before audio starts
-    document.body.addEventListener("click", start, { once: true });
+  draw();
+}
 
-  </script>
+// required for iPhone
+document.body.addEventListener("click", start, { once: true });
+
+</script>
 
 </body>
-
 </html>
