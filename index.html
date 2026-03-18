@@ -123,10 +123,10 @@
 
           // ===== DRAW BAR =====
           ctx.fillRect(
-            i * (canvas.width / bars),             // x position
-            canvas.height - height,                // y position (bottom aligned)
-            (canvas.width / bars) - 2,             // width
-            height                                // height
+          i * (canvas.width / bars),
+          baselineY - height,   // start from baseline
+          (canvas.width / bars) - 2,
+          height
           );
         }
       }
