@@ -115,25 +115,20 @@ async function start() {
 
       let value = sum / step;
 
-      // boost weak signal
-      value = value * 2;
+// boost signal (important)
+value = value * 3;
 
-      // prevent log(0)
-      value = Math.max(value, 1);
+// convert to dB using safer reference
+let db = 20 * Math.log10(value + 1);
 
-      // convert to dB
-      let db = 20 * Math.log10(value / 255);
+// clamp range (tuned for visuals)
+db = Math.max(0, Math.min(50, db));
 
-      // clamp dB
-      db = Math.max(minDb, Math.min(maxDb, db));
+// normalize to 0–1
+let normalized = db / 50;
 
-      // normalize
-      let normalized = (db - minDb) / (maxDb - minDb);
-      normalized = Math.max(0, Math.min(1, normalized));
-
-      // height
-      const height = normalized * (canvas.height * 0.8);
-
+// height
+const height = normalized * (canvas.height * 0.8);
       // color
       ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
 
