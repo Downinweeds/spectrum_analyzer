@@ -94,13 +94,28 @@
         ctx.moveTo(0, baselineY);
         ctx.lineTo(canvas.width, baselineY);
         ctx.stroke();
-        
+        // ===== DRAW dB SCALE =====
+ctx.fillStyle = "white";
+ctx.font = "12px monospace";
+
+for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
+  const y = canvas.height - ((dbMark - minDb) / (maxDb - minDb)) * (canvas.height * 0.8);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(20, y);
+  ctx.stroke();
+
+  ctx.fillText(dbMark + " dB", 25, y + 4);
+}
         // ===== GROUP INTO BARS =====
         const bars = 32; // number of visible bars
         const step = Math.floor(bufferLength / bars);
 
         for (let i = 0; i < bars; i++) {
-
+const minDb = -80;
+const maxDb = 0;
           // Average multiple frequency bins into one bar
           let sum = 0;
           for (let j = 0; j < step; j++) {
@@ -110,7 +125,8 @@
           let value = sum / step;
 
           // Convert to dB
-          let db = 20 * Math.log10(value / 255 + 0.0001);
+          value = Math.max(value, 1); // prevent log(0)
+let db = 20 * Math.log10(value / 255);
 
           // ===== NOISE FLOOR =====
           // Ignore very small values (background noise)
@@ -118,8 +134,6 @@
 
           // ===== LOG SCALE =====
           // Makes display more natural (like human hearing)
-          const minDb = -80;
-          const maxDb = 0;
 
           const normalized = (db - minDb) / (maxDb - minDb);
           const height = Math.max(0, normalized) * (canvas.height * 0.8);
@@ -127,26 +141,7 @@
           // ===== COLOR =====
           // Rainbow color across spectrum
           ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
-          // ===== DRAW dB SCALE =====
-          ctx.fillStyle = "white";
-          ctx.font = "12px monospace";
 
-          const minDb = -80;
-          const maxDb = 0;
-
-          for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
-          const y = canvas.height - ((dbMark - minDb) / (maxDb - minDb)) * (canvas.height * 0.8);
-
-          // Tick line
-          ctx.strokeStyle = "rgba(255,255,255,0.3)";
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(20, y);
-          ctx.stroke();
-
-          // Label
-          ctx.fillText(dbMark + " dB", 25, y + 4);
-}
           // ===== DRAW BAR =====
           ctx.fillRect(
           i * (canvas.width / bars),
