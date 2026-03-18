@@ -109,18 +109,44 @@
 
           let value = sum / step;
 
+          // Convert to dB
+          let db = 20 * Math.log10(value / 255 + 0.0001);
+
           // ===== NOISE FLOOR =====
           // Ignore very small values (background noise)
           if (value < 10) value = 0;
 
           // ===== LOG SCALE =====
           // Makes display more natural (like human hearing)
-          const height = Math.log10(value + 1) * 60;
+          const minDb = -80;
+          const maxDb = 0;
+
+          const normalized = (db - minDb) / (maxDb - minDb);
+          const height = Math.max(0, normalized) * (canvas.height * 0.8);
 
           // ===== COLOR =====
           // Rainbow color across spectrum
           ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+          // ===== DRAW dB SCALE =====
+          ctx.fillStyle = "white";
+          ctx.font = "12px monospace";
 
+          const minDb = -80;
+          const maxDb = 0;
+
+          for (let dbMark = 0; dbMark >= minDb; dbMark -= 20) {
+          const y = canvas.height - ((dbMark - minDb) / (maxDb - minDb)) * (canvas.height * 0.8);
+
+          // Tick line
+          ctx.strokeStyle = "rgba(255,255,255,0.3)";
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(20, y);
+          ctx.stroke();
+
+          // Label
+          ctx.fillText(dbMark + " dB", 25, y + 4);
+}
           // ===== DRAW BAR =====
           ctx.fillRect(
           i * (canvas.width / bars),
