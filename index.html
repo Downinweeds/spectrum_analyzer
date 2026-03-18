@@ -126,7 +126,12 @@ const maxDb = 0;
 
           // Convert to dB
           value = Math.max(value, 1); // prevent log(0)
+value = Math.max(value, 1); // avoid log(0)
+
 let db = 20 * Math.log10(value / 255);
+
+// clamp to visible range
+db = Math.max(-80, Math.min(0, db));
 
           // ===== NOISE FLOOR =====
           // Ignore very small values (background noise)
