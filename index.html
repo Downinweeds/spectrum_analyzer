@@ -102,49 +102,63 @@ async function start() {
     }
 
     // ===== BARS =====
-    const bars = 32;
-    const step = Math.floor(bufferLength / bars);
-
-    for (let i = 0; i < bars; i++) {
-
-      // average bins
-      let sum = 0;
-      for (let j = 0; j < step; j++) {
-        sum += dataArray[i * step + j];
-      }
-
-      let value = sum / step;
-
-// boost signal (important)
-value = value * 3;
-
-// convert to dB using safer reference
-let db = 20 * Math.log10(value + 1);
-
-// clamp range (tuned for visuals)
-db = Math.max(0, Math.min(50, db));
-
-// normalize to 0–1
-let normalized = db / 50;
-
-// height
-const height = normalized * (canvas.height * 0.8);
-      // color
-      ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
-
-      // draw bar
-      ctx.fillRect(
-        i * (canvas.width / bars),
-        baselineY - height,
-        (canvas.width / bars) - 2,
-        height
-      );
-    }
-  }
-
-  draw();
+ // ===== PEAK HOLD STORAGE =====
+if (!window.peakArray) {
+  window.peakArray = new Array(bars).fill(0);
 }
 
+for (let i = 0; i < bars; i++) {
+
+  // average bins
+  let sum = 0;
+  for (let j = 0; j < step; j++) {
+    sum += dataArray[i * step + j];
+  }
+
+  let value = sum / step;
+
+  // boost signal
+  value = value * 3;
+
+  // visual dB scaling (stable)
+  let db = 20 * Math.log10(value + 1);
+
+  db = Math.max(0, Math.min(50, db));
+
+  let normalized = db / 50;
+
+  const height = normalized * (canvas.height * 0.8);
+
+  // ===== BAR POSITIONING (FULL WIDTH) =====
+  const barWidth = canvas.width / bars;
+  const x = i * barWidth;
+
+  // ===== DRAW BAR =====
+  ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+
+  ctx.fillRect(
+    x,
+    baselineY - height,
+    barWidth - 2,
+    height
+  );
+
+  // ===== PEAK HOLD =====
+  if (height > window.peakArray[i]) {
+    window.peakArray[i] = height; // new peak
+  } else {
+    window.peakArray[i] *= 0.95; // slow decay
+  }
+
+  // draw peak line
+  ctx.fillStyle = "white";
+  ctx.fillRect(
+    x,
+    baselineY - window.peakArray[i] - 2,
+    barWidth - 2,
+    3
+  );
+}
 // required for iPhone
 document.body.addEventListener("click", start, { once: true });
 
