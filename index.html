@@ -105,14 +105,86 @@ async function start() {
     }
 
     // ===== DRAW BARS =====
-    const barWidth = canvas.width / bars;
+const barWidth = canvas.width / bars;
 
-const bars = 32;
-const step = Math.floor(bufferLength / bars);
-const peakArray = new Array(bars).fill(0);
+// ===== FREQUENCY LABELS =====
+ctx.fillStyle = "white";
+ctx.font = "10px monospace";
+
+const sampleRate = 44100;
+const nyquist = sampleRate / 2;
+
+const labelFreqs = [60, 250, 1000, 4000, 8000, 16000];
+
+for (let f of labelFreqs) {
+  const logPos = Math.log10(f / 20) / Math.log10(nyquist / 20);
+  const x = logPos * canvas.width;
+
+  ctx.fillText(
+    f >= 1000 ? (f / 1000) + "k" : f,
+    x,
+    canvas.height - 5
+  );
+}
+
+// ===== BARS LOOP =====
+for (let i = 0; i < bars; i++) {
+
+  // log-scaled index
+  const logIndex = Math.pow(i / bars, 2);
+  const index = Math.min(bufferLength - 1, Math.floor(logIndex * bufferLength));
+
+  let sum = 0;
+  let count = 0;
+
+  for (let j = 0; j < 4; j++) {
+    if (index + j < bufferLength) {
+      sum += dataArray[index + j];
+      count++;
+    }
   }
 
-  draw();
+  // prevent divide by zero
+  let value = count > 0 ? (sum / count) : 0;
+
+  // boost signal
+  value = value * 4;
+
+  // visual dB
+  let db = 20 * Math.log10(value + 1);
+  db = Math.max(0, Math.min(50, db));
+
+  let normalized = db / 50;
+  const height = normalized * (canvas.height * 0.8);
+
+  const x = i * barWidth;
+
+  // draw bar
+  ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+
+  ctx.fillRect(
+    x,
+    baselineY - height,
+    barWidth - 2,
+    height
+  );
+
+  // peak hold
+  if (height > peakArray[i]) {
+    peakArray[i] = height;
+  } else {
+    peakArray[i] *= 0.95;
+  }
+
+  // peak line
+  ctx.fillStyle = "white";
+  ctx.fillRect(
+    x,
+    baselineY - peakArray[i] - 2,
+    barWidth - 2,
+    3
+  );
+}
 }
 
 // ===== REQUIRED FOR iPHONE =====
