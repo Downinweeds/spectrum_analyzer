@@ -78,8 +78,8 @@ async function start() {
 
   function draw() { 
     requestAnimationFrame(draw);
-const sampleRate = 44100;
-const nyquist = sampleRate / 2;
+    const sampleRate = 44100;
+    const nyquist = sampleRate / 2;
     
     analyser.getByteFrequencyData(dataArray);
 
