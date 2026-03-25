@@ -65,7 +65,7 @@ async function start() {
   const source = audioCtx.createMediaStreamSource(stream);
 
   const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
+  analyser.fftSize = 2048;   //started at 512
   analyser.smoothingTimeConstant = 0.8;
 
   source.connect(analyser);
