@@ -130,70 +130,80 @@ async function start() {
       );
     }
 
-    // ===== BARS =====
-    const barWidth = canvas.width / bars;
+    // ===== BARS =====(insert new code)
+// ===== MAP FFT → LOG BARS =====
+const sampleRate = 44100;
+const fftSize = analyser.fftSize;
+const nyquist = sampleRate / 2;
 
-    for (let i = 0; i < bars; i++) {
+const minFreq = 20;
+const maxFreq = nyquist;
 
-      // LOG SPACING (stable)
-      const logIndex = Math.pow(i / bars, 1.8);
-      const index = Math.floor(logIndex * (bufferLength - 1));
+const barWidth = canvas.width / bars;
 
-      let sum = 0;
-      let count = 0;
+// storage
+let barValues = new Array(bars).fill(0);
+let barCounts = new Array(bars).fill(0);
 
-      for (let j = 0; j < 8; j++) {
-        if (index + j < bufferLength) {
-          sum += dataArray[index + j];
-          count++;
-        }
-      }
+// map FFT bins → bars
+for (let i = 0; i < bufferLength; i++) {
 
-      let value = count > 0 ? (sum / count) : 0;
+  const freq = i * sampleRate / fftSize;
+  if (freq < minFreq) continue;
 
-// ===== APPLY A-WEIGHTING =====
-const freq = (index / bufferLength) * (44100 / 2);
-const weight = aWeighting(freq);
+  const logPos = Math.log10(freq / minFreq) / Math.log10(maxFreq / minFreq);
+  const barIndex = Math.floor(logPos * bars);
 
-value = value * weight;
+  if (barIndex >= 0 && barIndex < bars) {
+    barValues[barIndex] += dataArray[i];
+    barCounts[barIndex]++;
+  }
+}
 
-      // boost + floor
-      value = Math.max(value * 5, 2);
+// ===== DRAW BARS =====
+for (let i = 0; i < bars; i++) {
 
-      // visual dB
-      let db = 20 * Math.log10(value + 1);
-      db = Math.max(0, Math.min(50, db));
+  let value = barCounts[i] > 0 ? barValues[i] / barCounts[i] : 0;
 
-      let normalized = db / 50;
-      const height = normalized * (canvas.height * 0.8);
+  // A-weighting
+  const freq = minFreq * Math.pow(maxFreq / minFreq, i / bars);
+  value *= aWeighting(freq);
 
-      const x = i * barWidth;
+  value = Math.max(value * 4, 2);
 
-      // bar
-      ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+  let db = 20 * Math.log10(value + 1);
+  db = Math.max(0, Math.min(50, db));
 
-      ctx.fillRect(
-        x,
-        baselineY - height,
-        barWidth - 2,
-        height
-      );
+  let normalized = db / 50;
+  const height = normalized * (canvas.height * 0.8);
 
-      // ===== PEAK HOLD =====
-      if (height > peakArray[i]) {
-        peakArray[i] = height;
-      } else {
-        peakArray[i] *= 0.95;
-      }
+  const x = i * barWidth;
 
-      ctx.fillStyle = "white";
-      ctx.fillRect(
-        x,
-        baselineY - peakArray[i] - 2,
-        barWidth - 2,
-        3
-      );
-    }
+  ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+
+  ctx.fillRect(
+    x,
+    baselineY - height,
+    barWidth - 2,
+    height
+  );
+
+  // peak hold
+  if (height > peakArray[i]) {
+    peakArray[i] = height;
+  } else {
+    peakArray[i] *= 0.95;
+  }
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(
+    x,
+    baselineY - peakArray[i] - 2,
+    barWidth - 2,
+    3
+  );
+}
+    
   }
 
   draw();
