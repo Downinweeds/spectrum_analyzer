@@ -38,7 +38,22 @@ window.addEventListener("resize", resize);
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", resize);
 }
+// ===== A-WEIGHTING FUNCTION =====
+function aWeighting(f) {
+  const f2 = f * f;
 
+  const ra =
+    (12200 * 12200 * f2 * f2) /
+    ((f2 + 20.6 * 20.6) *
+     Math.sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) *
+     (f2 + 12200 * 12200));
+
+  // convert to dB
+  const a = 20 * Math.log10(ra) + 2;
+
+  // convert back to linear gain
+  return Math.pow(10, a / 20);
+}
 // ===== START AUDIO =====
 async function start() {
 
@@ -135,6 +150,12 @@ async function start() {
       }
 
       let value = count > 0 ? (sum / count) : 0;
+
+// ===== APPLY A-WEIGHTING =====
+const freq = (index / bufferLength) * (44100 / 2);
+const weight = aWeighting(freq);
+
+value = value * weight;
 
       // boost + floor
       value = Math.max(value * 5, 2);
