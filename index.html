@@ -130,10 +130,8 @@ async function start() {
 
     // ===== BARS =====(insert new code)
 // ===== MAP FFT → LOG BARS =====
-const sampleRate = 44100;
-const fftSize = analyser.fftSize;
-const nyquist = sampleRate / 2;
 
+const fftSize = analyser.fftSize;
 const minFreq = 20;
 const maxFreq = nyquist;
 
