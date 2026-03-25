@@ -170,9 +170,12 @@ for (let i = 0; i < bars; i++) {
   value = Math.max(value * 4, 2);
 
   let db = 20 * Math.log10(value + 1);
-  db = Math.max(0, Math.min(50, db));
+  const minDb = 0;
+  const maxDb = 60;   // increase headroom
 
-  let normalized = db / 50;
+  db = Math.max(minDb, Math.min(maxDb, db));
+
+  let normalized = (db - minDb) / (maxDb - minDb);
   const height = normalized * (canvas.height * 0.8);
 
   const x = i * barWidth;
