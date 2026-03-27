@@ -158,6 +158,9 @@ for (let i = 0; i < bufferLength; i++) {
   }
 }
 
+// clamp to display range
+const minDb = -90;
+const maxDb = -20;
 // ===== DRAW BARS =====
 for (let i = 0; i < bars; i++) {
 
@@ -181,14 +184,8 @@ db += weightDb * 0.5;
 // apply gain
 db += gain;
 
-// clamp to display range
-const minDb = -90;
-const maxDb = -20;
 
 db = Math.max(minDb, Math.min(maxDb, db));
-
-// normalize to screen
-let normalized = (db - minDb) / (maxDb - minDb);
 
 // normalize
 let normalized = (db - minDb) / (maxDb - minDb);
