@@ -23,41 +23,29 @@ canvas {
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-// simple add of a comment
+
 // ===== RESIZE =====
 function resize() {
-  const height = window.visualViewport
-    ? window.visualViewport.height
-    : window.innerHeight;
-
   canvas.width = window.innerWidth;
-  canvas.height = height;
+  canvas.height = window.innerHeight;
 }
 resize();
 window.addEventListener("resize", resize);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", resize);
-}
-// ===== A-WEIGHTING FUNCTION =====
+
+// ===== A-WEIGHTING =====
 function aWeighting(f) {
   const f2 = f * f;
-
   const ra =
     (12200 * 12200 * f2 * f2) /
     ((f2 + 20.6 * 20.6) *
      Math.sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) *
      (f2 + 12200 * 12200));
-
-  // convert to dB
   const a = 20 * Math.log10(ra) + 2;
-
-  // convert back to linear gain
   return Math.pow(10, a / 20);
 }
+
 // ===== START AUDIO =====
 async function start() {
-
-  console.log("start called");
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -65,7 +53,7 @@ async function start() {
   const source = audioCtx.createMediaStreamSource(stream);
 
   const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;   //started at 512
+  analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.8;
 
   source.connect(analyser);
@@ -74,13 +62,18 @@ async function start() {
   const dataArray = new Float32Array(bufferLength);
 
   const bars = 32;
-  const peakArray = new Array(bars).fill(0);
+  const peakArray = new Array(bars).fill(-90);
 
-  function draw() { 
+  const minDb = -90;
+  const maxDb = -20;
+  const gain = 6; // dB boost
+
+  function draw() {
     requestAnimationFrame(draw);
-    const sampleRate = 44100;
+
+    const sampleRate = audioCtx.sampleRate;
     const nyquist = sampleRate / 2;
-    
+
     analyser.getFloatFrequencyData(dataArray);
 
     // clear
@@ -102,7 +95,7 @@ async function start() {
     ctx.font = "12px monospace";
 
     for (let db = -20; db >= -90; db -= 10) {
-      const y = baselineY - ((db + 80) / 80) * (canvas.height * 0.8);
+      const y = baselineY - ((db - minDb) / (maxDb - minDb)) * (canvas.height * 0.8);
 
       ctx.strokeStyle = "rgba(255,255,255,0.3)";
       ctx.beginPath();
@@ -114,7 +107,6 @@ async function start() {
     }
 
     // ===== FREQUENCY LABELS =====
-
     ctx.font = "10px monospace";
 
     const labelFreqs = [60, 250, 1000, 4000, 8000, 16000];
@@ -130,101 +122,70 @@ async function start() {
       );
     }
 
-    // ===== BARS =====(insert new code)
-// ===== MAP FFT → LOG BARS =====
-const gain = 6.0;   // gain boost -10 to +10 dB
-const fftSize = analyser.fftSize;
-const minFreq = 20;
-const maxFreq = nyquist;
+    // ===== LOG BIN MAPPING (MAX method) =====
+    const barValues = new Array(bars).fill(-120);
 
-const barWidth = canvas.width / bars;
+    for (let i = 0; i < bufferLength; i++) {
 
-// storage
-let barValues = new Array(bars).fill(0);
-let barCounts = new Array(bars).fill(0);
+      const freq = i * sampleRate / analyser.fftSize;
+      if (freq < 20) continue;
 
-// map FFT bins → bars
-for (let i = 0; i < bufferLength; i++) {
+      const logPos = Math.log10(freq / 20) / Math.log10(nyquist / 20);
+      const barIndex = Math.floor(logPos * bars);
 
-  const freq = i * sampleRate / fftSize;
-  if (freq < minFreq) continue;
+      if (barIndex >= 0 && barIndex < bars) {
+        barValues[barIndex] = Math.max(barValues[barIndex], dataArray[i]);
+      }
+    }
 
-  const logPos = Math.log10(freq / minFreq) / Math.log10(maxFreq / minFreq);
-  const barIndex = Math.floor(logPos * bars);
+    const barWidth = canvas.width / bars;
 
-  if (barIndex >= 0 && barIndex < bars) {
-    barValues[barIndex] += dataArray[i];
-    barCounts[barIndex]++;
-  }
-}
+    // ===== DRAW BARS =====
+    for (let i = 0; i < bars; i++) {
 
-// clamp to display range
-const minDb = -90;
-const maxDb = -20;
-// ===== DRAW BARS =====
-for (let i = 0; i < bars; i++) {
+      let db = barValues[i];
 
-  let value = barCounts[i] > 0 ? barValues[i] / barCounts[i] : 0;
+      // A-weighting in dB
+      const freq = 20 * Math.pow(nyquist / 20, i / bars);
+      const weight = aWeighting(freq);
+      const weightDb = 20 * Math.log10(weight + 0.0001);
 
-  // A-weighting
-  const freq = minFreq * Math.pow(maxFreq / minFreq, i / bars);
-//value *= aWeighting(freq); //temporary disable A-weighting to test gain boost
+      db += weightDb * 0.5;
 
-  //new gain code here
+      // gain
+      db += gain;
 
-// value is already in dB from Float32Array
-let db = value;
+      // clamp
+      db = Math.max(minDb, Math.min(maxDb, db));
 
-// A-weighting in dB
-const weight = aWeighting(freq);
-const weightDb = 20 * Math.log10(weight + 0.0001);
+      const normalized = (db - minDb) / (maxDb - minDb);
+      const height = normalized * (canvas.height * 0.8);
 
-db += weightDb * 0.5;
+      const x = i * barWidth;
 
-// apply gain
-db += gain;
+      // bar
+      ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
+      ctx.fillRect(x, baselineY - height, barWidth - 2, height);
 
+      // peak hold
+      if (db > peakArray[i]) {
+        peakArray[i] = db;
+      } else {
+        peakArray[i] -= 0.5;
+      }
 
-db = Math.max(minDb, Math.min(maxDb, db));
+      const peakNorm = (peakArray[i] - minDb) / (maxDb - minDb);
+      const peakY = baselineY - peakNorm * (canvas.height * 0.8);
 
-// normalize
-let normalized = (db - minDb) / (maxDb - minDb);
-  // end new gain code
-  const height = normalized * (canvas.height * 0.8);
-
-  const x = i * barWidth;
-
-  ctx.fillStyle = `hsl(${i / bars * 360}, 100%, 50%)`;
-
-  ctx.fillRect(
-    x,
-    baselineY - height,
-    barWidth - 2,
-    height
-  );
-
-  // peak hold
-  if (height > peakArray[i]) {
-    peakArray[i] = height;
-  } else {
-    peakArray[i] *= 0.95;
-  }
-
-  ctx.fillStyle = "white";
-  ctx.fillRect(
-    x,
-    baselineY - peakArray[i] - 2,
-    barWidth - 2,
-    3
-  );
-}
-    
+      ctx.fillStyle = "white";
+      ctx.fillRect(x, peakY, barWidth - 2, 2);
+    }
   }
 
   draw();
 }
 
-// ===== CLICK HANDLER (reliable on iPhone) =====
+// ===== START ON CLICK =====
 document.addEventListener("click", start, { once: true });
 
 </script>
