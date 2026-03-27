@@ -167,17 +167,9 @@ for (let i = 0; i < bars; i++) {
   const freq = minFreq * Math.pow(maxFreq / minFreq, i / bars);
   value *= aWeighting(freq);
 
-  value = Math.max(value * gain, 1);
-  let db = 20 * Math.log10(value + 1);
+  //new gain code here
 
-  // soft knee compression
-  db = db / (1 + db / 60);
-  const minDb = 0;
-  const maxDb = 60;   // increase headroom
-
-  db = Math.max(minDb, Math.min(maxDb, db));
-
-  let normalized = (db - minDb) / (maxDb - minDb);
+  // end new gain code
   const height = normalized * (canvas.height * 0.8);
 
   const x = i * barWidth;
