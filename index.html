@@ -165,7 +165,7 @@ for (let i = 0; i < bars; i++) {
 
   // A-weighting
   const freq = minFreq * Math.pow(maxFreq / minFreq, i / bars);
-  value *= aWeighting(freq);
+//value *= aWeighting(freq); //temporary disable A-weighting to test gain boost
 
   //new gain code here
 // boost signal BEFORE log
