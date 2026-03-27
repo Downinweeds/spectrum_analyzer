@@ -174,6 +174,12 @@ value = value * 5;
 // convert to dB
 let db = 20 * Math.log10(value + 1);
 
+// ===== A-WEIGHTING IN dB DOMAIN =====
+const weight = aWeighting(freq);
+const weightDb = 20 * Math.log10(weight + 0.0001); // avoid log(0)
+
+db += weightDb*0.5;
+
 // apply gain
 db += gain;
 
