@@ -182,6 +182,8 @@ db += weightDb*0.5;
 
 // apply gain
 db += gain;
+// ===== NOISE FLOOR / GATE =====
+if (db < 5) db = 0;
 
 // clamp range
 const minDb = 0;
