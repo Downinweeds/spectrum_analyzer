@@ -132,7 +132,7 @@ async function start() {
 
     // ===== BARS =====(insert new code)
 // ===== MAP FFT → LOG BARS =====
-
+const gain = 2.0;   // try 1.0 → 5.0
 const fftSize = analyser.fftSize;
 const minFreq = 20;
 const maxFreq = nyquist;
@@ -167,8 +167,7 @@ for (let i = 0; i < bars; i++) {
   const freq = minFreq * Math.pow(maxFreq / minFreq, i / bars);
   value *= aWeighting(freq);
 
-  value = Math.max(value * 4, 2);
-
+  value = Math.max(value * gain, 1);
   let db = 20 * Math.log10(value + 1);
   const minDb = 0;
   const maxDb = 60;   // increase headroom
