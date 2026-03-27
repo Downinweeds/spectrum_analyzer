@@ -169,25 +169,26 @@ for (let i = 0; i < bars; i++) {
 
   //new gain code here
 
-// convert to dB
+// value is already in dB from Float32Array
 let db = value;
 
-// ===== A-WEIGHTING IN dB DOMAIN =====
+// A-weighting in dB
 const weight = aWeighting(freq);
-const weightDb = 20 * Math.log10(weight + 0.0001); // avoid log(0)
+const weightDb = 20 * Math.log10(weight + 0.0001);
 
-db += weightDb*0.5;
+db += weightDb * 0.5;
 
 // apply gain
 db += gain;
-// ===== NOISE FLOOR / GATE =====
-if (db < 5) db = 0;
 
-// clamp range
+// clamp to display range
 const minDb = -90;
 const maxDb = -20;
 
 db = Math.max(minDb, Math.min(maxDb, db));
+
+// normalize to screen
+let normalized = (db - minDb) / (maxDb - minDb);
 
 // normalize
 let normalized = (db - minDb) / (maxDb - minDb);
