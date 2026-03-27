@@ -168,19 +168,22 @@ for (let i = 0; i < bars; i++) {
   value *= aWeighting(freq);
 
   //new gain code here
+// boost signal BEFORE log
+value = value * 5;
+
+// convert to dB
 let db = 20 * Math.log10(value + 1);
 
-// gain in dB (more effective)
+// apply gain
 db += gain;
 
-// softer compression
-db = db / (1 + db / 100);
-
+// clamp range
 const minDb = 0;
 const maxDb = 60;
 
 db = Math.max(minDb, Math.min(maxDb, db));
 
+// normalize
 let normalized = (db - minDb) / (maxDb - minDb);
   // end new gain code
   const height = normalized * (canvas.height * 0.8);
