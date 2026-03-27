@@ -71,7 +71,7 @@ async function start() {
   source.connect(analyser);
 
   const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
+  const dataArray = new Float32Array(bufferLength);
 
   const bars = 32;
   const peakArray = new Array(bars).fill(0);
@@ -81,7 +81,7 @@ async function start() {
     const sampleRate = 44100;
     const nyquist = sampleRate / 2;
     
-    analyser.getByteFrequencyData(dataArray);
+    analyser.getFloatFrequencyData(dataArray);
 
     // clear
     ctx.fillStyle = "black";
@@ -101,7 +101,7 @@ async function start() {
     ctx.fillStyle = "white";
     ctx.font = "12px monospace";
 
-    for (let db = 0; db >= -80; db -= 20) {
+    for (let db = -20; db >= -90; db -= 10) {
       const y = baselineY - ((db + 80) / 80) * (canvas.height * 0.8);
 
       ctx.strokeStyle = "rgba(255,255,255,0.3)";
@@ -168,11 +168,9 @@ for (let i = 0; i < bars; i++) {
 //value *= aWeighting(freq); //temporary disable A-weighting to test gain boost
 
   //new gain code here
-// boost signal BEFORE log
-value = value * 5;
 
 // convert to dB
-let db = 20 * Math.log10(value + 1);
+let db = value;
 
 // ===== A-WEIGHTING IN dB DOMAIN =====
 const weight = aWeighting(freq);
@@ -186,8 +184,8 @@ db += gain;
 if (db < 5) db = 0;
 
 // clamp range
-const minDb = 0;
-const maxDb = 60;
+const minDb = -90;
+const maxDb = -20;
 
 db = Math.max(minDb, Math.min(maxDb, db));
 
