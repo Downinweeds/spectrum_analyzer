@@ -132,7 +132,7 @@ async function start() {
 
     // ===== BARS =====(insert new code)
 // ===== MAP FFT → LOG BARS =====
-const gain = 6.0;   // try 1.0 → 5.0
+const gain = 6.0;   // gain boost -10 to +10 dB
 const fftSize = analyser.fftSize;
 const minFreq = 20;
 const maxFreq = nyquist;
@@ -168,7 +168,20 @@ for (let i = 0; i < bars; i++) {
   value *= aWeighting(freq);
 
   //new gain code here
+let db = 20 * Math.log10(value + 1);
 
+// gain in dB (more effective)
+db += gain;
+
+// softer compression
+db = db / (1 + db / 100);
+
+const minDb = 0;
+const maxDb = 60;
+
+db = Math.max(minDb, Math.min(maxDb, db));
+
+let normalized = (db - minDb) / (maxDb - minDb);
   // end new gain code
   const height = normalized * (canvas.height * 0.8);
 
