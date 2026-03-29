@@ -21,6 +21,10 @@ canvas {
 <canvas id="canvas"></canvas>
 
 <script>
+//for frequency and peak data
+let peakFreq = 0;
+let peakDb = -100;
+
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
@@ -50,8 +54,11 @@ async function start() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  
   const source = audioCtx.createMediaStreamSource(stream);
-
+if (audioCtx.state === "suspended") {
+  await audioCtx.resume();
+}
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.8;
@@ -63,7 +70,7 @@ async function start() {
 
   const bars = 32;
   const peakArray = new Array(bars).fill(-90);
-
+  const timeArray = new Uint8Array(analyser.fftSize);
   const minDb = -90;
   const maxDb = -20;
   const gain = 6; // dB boost
@@ -125,8 +132,15 @@ async function start() {
     // ===== LOG BIN MAPPING (MAX method) =====
     const barValues = new Array(bars).fill(-120);
 
+    let peakMaxDb = -Infinity;
+    let maxIndex = 0;
+// Begin FFT Loop
     for (let i = 0; i < bufferLength; i++) {
 
+      if (dataArray[i] > peakMaxDb) {
+      peakMaxDb = dataArray[i];
+      maxIndex = i;
+}
       const freq = i * sampleRate / analyser.fftSize;
       if (freq < 20) continue;
 
@@ -137,6 +151,28 @@ async function start() {
         barValues[barIndex] = Math.max(barValues[barIndex], dataArray[i]);
       }
     }
+// End FFT Loop
+    // ===== PARABOLIC PEAK INTERPOLATION =====
+let trueIndex = maxIndex;
+
+if (maxIndex > 0 && maxIndex < bufferLength - 1) {
+  const left = dataArray[maxIndex - 1];
+  const center = dataArray[maxIndex];
+  const right = dataArray[maxIndex + 1];
+
+  const denom = (left - 2 * center + right);
+
+  if (denom !== 0) {
+    const delta = 0.5 * (left - right) / denom;
+    trueIndex = maxIndex + delta;
+  }
+}
+
+// convert to frequency
+peakFreq = trueIndex * sampleRate / analyser.fftSize;
+
+// peak amplitude stays same (center bin)
+peakDb = dataArray[maxIndex];
 
     const barWidth = canvas.width / bars;
 
@@ -179,13 +215,53 @@ async function start() {
 
       ctx.fillStyle = "white";
       ctx.fillRect(x, peakY, barWidth - 2, 2);
+
+      ctx.fillStyle = "white";
+      ctx.font = "16px monospace";
+
+;
+      //end of draw loop
     }
+   // get waveform once per frame
+analyser.getByteTimeDomainData(timeArray);
+
+// draw peak text once
+ctx.fillStyle = "white";
+ctx.font = "16px monospace";
+ctx.fillText(
+  `Peak: ${Math.round(peakFreq)} Hz  ${peakDb.toFixed(1)} dB`,
+  20,
+  20
+);
+   
+    // ===== OSCILLOSCOPE =====
+ctx.strokeStyle = "lime";
+ctx.lineWidth = 2;
+
+ctx.beginPath();
+
+const sliceWidth = canvas.width / timeArray.length;
+
+for (let i = 0; i < timeArray.length; i++) {
+  const v = timeArray[i] / 128.0; // center = 1
+  const y = (v * canvas.height * 0.2); // small height
+  const x = i * sliceWidth;
+
+  if (i === 0) {
+    ctx.moveTo(x, y);
+  } else {
+    ctx.lineTo(x, y);
+  }
+}
+
+ctx.stroke();
   }
 
   draw();
 }
 
 // ===== START ON CLICK =====
+document.addEventListener("touchstart", start, { once: true });
 document.addEventListener("click", start, { once: true });
 
 </script>
