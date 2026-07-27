@@ -17,7 +17,10 @@ A **WiFi connection wizard** (captive portal) walks you through linking the phon
 
 1. Install the **ESP32** board package (Espressif Systems) via Boards Manager.
 2. Select board: **XIAO_ESP32S3** (Seeed Studio).
-3. Open `PulseGenerator/PulseGenerator.ino` and upload.
+3. Copy the whole `PulseGenerator` folder (both `PulseGenerator.ino` and `webui.h`) into your Arduino sketchbook.
+4. Open `PulseGenerator.ino` and upload.
+
+> Keep `webui.h` next to the `.ino`. The phone UI lives in that header so the Arduino IDE does not mis-parse the JavaScript.
 
 ## WiFi connection wizard
 
