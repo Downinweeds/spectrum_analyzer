@@ -373,8 +373,35 @@ const freq = document.getElementById('freq');
 const dur = document.getElementById('dur');
 const freqVal = document.getElementById('freqVal');
 const durVal = document.getElementById('durVal');
-freq.oninput = () => freqVal.textContent = freq.value;
-dur.oninput = () => durVal.textContent = dur.value;
+
+// Do not let the 1 Hz status poll overwrite the sliders while the user is adjusting them.
+let slidersLoaded = false;
+let sliding = false;
+
+function syncLabels() {
+  freqVal.textContent = freq.value;
+  durVal.textContent = dur.value;
+}
+
+async function pushSettings() {
+  try {
+    await fetch('/set?freq=' + encodeURIComponent(freq.value) +
+                '&duration=' + encodeURIComponent(dur.value));
+  } catch (e) {}
+}
+
+freq.addEventListener('pointerdown', () => { sliding = true; });
+dur.addEventListener('pointerdown', () => { sliding = true; });
+freq.addEventListener('touchstart', () => { sliding = true; }, {passive: true});
+dur.addEventListener('touchstart', () => { sliding = true; }, {passive: true});
+window.addEventListener('pointerup', () => { sliding = false; });
+window.addEventListener('touchend', () => { sliding = false; });
+
+freq.addEventListener('input', syncLabels);
+dur.addEventListener('input', syncLabels);
+// Commit to the XIAO when the finger/mouse is released
+freq.addEventListener('change', pushSettings);
+dur.addEventListener('change', pushSettings);
 
 function fmtRemain(sec) {
   if (sec == null || sec < 0) return '—';
@@ -403,8 +430,16 @@ async function refresh() {
     const [rs, rw] = await Promise.all([fetch('/status'), fetch('/wifi-info')]);
     const j = await rs.json();
     const w = await rw.json();
-    freq.value = j.freq; dur.value = j.duration;
-    freqVal.textContent = j.freq; durVal.textContent = j.duration;
+
+    // Only pull slider positions from the device on first load, or while a
+    // pulse train is running. Otherwise keep the user's local settings.
+    if (!sliding && (j.running || !slidersLoaded)) {
+      freq.value = j.freq;
+      dur.value = j.duration;
+      syncLabels();
+      slidersLoaded = true;
+    }
+
     const pill = document.getElementById('statePill');
     if (j.running) {
       pill.textContent = 'RUNNING'; pill.className = 'pill on';

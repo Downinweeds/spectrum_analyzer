@@ -94,6 +94,7 @@ void handleRoot();
 void handleWizard();
 void handleControl();
 void handleStatus();
+void handleSet();
 void handleStart();
 void handleStop();
 void handleWifiInfo();
@@ -403,6 +404,18 @@ void handleStatus() {
   server.send(200, "application/json", json);
 }
 
+void handleSet() {
+  // Update stored frequency / duration without starting the pulse train.
+  // Used by the phone UI when a slider is released.
+  if (server.hasArg("freq")) {
+    pulse.frequencyHz = clampInt(server.arg("freq").toInt(), FREQ_MIN_HZ, FREQ_MAX_HZ);
+  }
+  if (server.hasArg("duration")) {
+    pulse.durationMin = clampInt(server.arg("duration").toInt(), DUR_MIN_MIN, DUR_MAX_MIN);
+  }
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 void handleStart() {
   int freq = pulse.frequencyHz;
   int dur  = pulse.durationMin;
@@ -435,6 +448,7 @@ void setupHttpRoutes() {
   server.on("/wizard", HTTP_GET, handleWizard);
   server.on("/control", HTTP_GET, handleControl);
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/set", HTTP_GET, handleSet);
   server.on("/start", HTTP_GET, handleStart);
   server.on("/stop", HTTP_GET, handleStop);
   server.on("/wifi-info", HTTP_GET, handleWifiInfo);
