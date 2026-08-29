@@ -41,7 +41,11 @@ On the Expansion Board the **USER button shares D1**. That is fine for this sket
 3. Install **esp32** by Espressif, then select board **XIAO_ESP32C3** (or **Seeed XIAO ESP32C3**).
 4. Tools → **USB CDC On Boot: Enabled**.
 5. Library Manager: install **U8g2** by oliver.
-6. Open **only** `xiao_vibration_monitor.ino` (it is self-contained) and upload.
+6. Put **both** `xiao_vibration_monitor.ino` and `web_pages.h` in the same sketch folder, then open the `.ino` and upload.
+
+   Arduino IDE only sees extra files that sit next to the `.ino`. If you copied just the sketch, you will get `web_pages.h: No such file or directory`. Save `web_pages.h` here:
+
+   `Documents\Arduino\xiao_vibration_monitor\web_pages.h`
 
 ## First-time Wi-Fi wizard (phone)
 
