@@ -19,6 +19,8 @@ Piezo -  ----  GND
 1 MΩ     ----  between D1 and GND (across the piezo)
 ```
 
+A 3-wire analog vibration module also works: **SIG → D1**, **VCC → 3V3**, **GND → GND**.
+
 D1 is an ADC1 pin, so analog reads still work while Wi-Fi is on.
 
 ### D1 is also the expansion USER button

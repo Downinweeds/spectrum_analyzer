@@ -307,6 +307,9 @@ void setupServer() {
   server.on("/", handleRoot);
   server.on("/wifi", handleWizard);
   server.on("/wifi/save", HTTP_POST, handleWifiSave);
+  server.on("/wifi/save", HTTP_GET, []() {
+    server.send_P(200, "text/html", CONNECTING_HTML);
+  });
   server.on("/api/status", handleApiStatus);
   server.on("/api/scan", handleApiScan);
   server.on("/api/sensitivity", HTTP_POST, handleApiSensitivity);

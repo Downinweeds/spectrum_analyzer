@@ -38,13 +38,13 @@ CONNECTING = extract_html("CONNECTING_HTML")
 def mock_status() -> dict:
     elapsed = time.time() - t0
     # Quiet most of the time, with periodic knocks.
-    knock = max(0.0, math.sin(elapsed * 1.7) ** 35) * 90
-    chatter = 4 + 3 * abs(math.sin(elapsed * 9.0))
+    knock = max(0.0, math.sin(elapsed * 0.9)) ** 6 * 82
+    chatter = 3 + 2 * abs(math.sin(elapsed * 7.0))
     raw = int(40 + chatter * 3 + knock * 8)
     amplitude = int(min(100, chatter + knock * (sensitivity / 50.0)))
     return {
         "amplitude": amplitude,
-        "peak": max(amplitude, int(knock + 12)),
+        "peak": max(amplitude, int(knock + 18)),
         "raw": raw,
         "detected": amplitude >= 12,
         "sensitivity": sensitivity,
@@ -73,7 +73,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, DASHBOARD.encode(), "text/html; charset=utf-8")
         elif path == "/wifi":
             self._send(200, WIZARD.encode(), "text/html; charset=utf-8")
-        elif path == "/connecting":
+        elif path in ("/connecting", "/wifi/save"):
             self._send(200, CONNECTING.encode(), "text/html; charset=utf-8")
         elif path == "/api/status":
             self._send(200, json.dumps(mock_status()).encode(), "application/json")
