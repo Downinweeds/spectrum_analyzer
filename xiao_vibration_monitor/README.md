@@ -41,7 +41,7 @@ On the Expansion Board the **USER button shares D1**. That is fine for this sket
 3. Install **esp32** by Espressif, then select board **XIAO_ESP32C3** (or **Seeed XIAO ESP32C3**).
 4. Tools → **USB CDC On Boot: Enabled**.
 5. Library Manager: install **U8g2** by oliver.
-6. Open `xiao_vibration_monitor.ino` and upload.
+6. Open **only** `xiao_vibration_monitor.ino` (it is self-contained) and upload.
 
 ## First-time Wi-Fi wizard (phone)
 
