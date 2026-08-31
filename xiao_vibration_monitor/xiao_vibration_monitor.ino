@@ -373,6 +373,7 @@ String wifiSsid;
 String wifiPass;
 uint32_t connectStarted = 0;
 bool mdnsStarted = false;
+bool serverStarted = false;
 
 int sensitivity = 50;     // 10..100, higher = more sensitive
 int amplitude = 0;        // 0..100 relative
@@ -390,6 +391,7 @@ uint32_t detectHoldUntil = 0;
 
 void drawCentered(int y, const char* text);
 void showBootScreen();
+void showStatus(const char* a, const char* b = "", const char* c = "");
 void drawPortalScreen();
 void drawConnectingScreen();
 void drawRunScreen();
@@ -398,6 +400,8 @@ void startPortal(const char* err = nullptr);
 void beginConnect();
 void finishConnect();
 void setupServer();
+void ensureServerStarted();
+void prepareWifiRadio();
 void handleRoot();
 void handleWizard();
 void handleWifiSave();
@@ -420,18 +424,23 @@ void setup() {
   u8g2.begin();
   u8g2.setFlipMode(1);
   showBootScreen();
+  delay(300);
 
+  showStatus("Loading", "settings...");
   prefs.begin("vibe", false);
   wifiSsid = prefs.getString("ssid", "");
   wifiPass = prefs.getString("pass", "");
   sensitivity = constrain(prefs.getInt("sens", 50), 10, 100);
 
-  setupServer();
+  setupServer();  // routes only; listen after Wi-Fi is up
 
   const bool forceWizard = bootButtonHeld();
   if (forceWizard) {
     Serial.println("USER button held — opening Wi-Fi wizard");
   }
+
+  showStatus("Starting", "Wi-Fi radio", "please wait");
+  prepareWifiRadio();
 
   if (forceWizard || wifiSsid.isEmpty()) {
     startPortal();
@@ -544,12 +553,16 @@ void sampleVibration() {
 }
 
 void showBootScreen() {
+  showStatus("Vibe Monitor", "XIAO ESP32-C3", "starting...");
+}
+
+void showStatus(const char* a, const char* b, const char* c) {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tf);
-  drawCentered(18, "Vibe Monitor");
+  if (a && a[0]) drawCentered(18, a);
   u8g2.setFont(u8g2_font_5x8_tf);
-  drawCentered(40, "XIAO ESP32-C3");
-  drawCentered(52, "starting...");
+  if (b && b[0]) drawCentered(40, b);
+  if (c && c[0]) drawCentered(52, c);
   u8g2.sendBuffer();
 }
 
@@ -637,8 +650,21 @@ void setupServer() {
   server.on("/success.txt", handleCaptive);
   server.on("/fwlink/", handleCaptive);
   server.onNotFound(handleCaptive);
+  // Do not server.begin() here. ESP32 Arduino 3.x can hang if the
+  // listener starts before the Wi-Fi radio is up.
+}
 
+void ensureServerStarted() {
+  if (serverStarted) return;
   server.begin();
+  serverStarted = true;
+}
+
+void prepareWifiRadio() {
+  WiFi.persistent(false);
+  WiFi.setSleep(false);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
 }
 
 void handleCaptive() {
@@ -740,15 +766,25 @@ void handleApiSensitivity() {
 }
 
 void startPortal(const char* err) {
+  showStatus("Wi-Fi setup", "starting AP", AP_NAME);
+
   dnsServer.stop();
-  WiFi.disconnect(true, true);
-  delay(100);
+  WiFi.disconnect(false, false);
+  delay(50);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_NAME);
+  delay(200);
+  // Channel 6 is more stable for ESP32-C3 SoftAP than channel 1.
+  WiFi.softAP(AP_NAME, nullptr, 6);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   delay(150);
   dnsServer.start(53, "*", WiFi.softAPIP());
+  ensureServerStarted();
+
   mode = MODE_PORTAL;
   mdnsStarted = false;
+  drawPortalScreen();
   Serial.print("Wi-Fi wizard AP: ");
   Serial.println(AP_NAME);
   Serial.print("Open http://");
@@ -757,12 +793,20 @@ void startPortal(const char* err) {
 }
 
 void beginConnect() {
+  showStatus("Connecting", wifiSsid.c_str(), "please wait");
+
   dnsServer.stop();
   WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.setHostname("VibeMonitor");
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+  ensureServerStarted();
+
   connectStarted = millis();
   mode = MODE_CONNECTING;
+  drawConnectingScreen();
   Serial.print("Connecting to ");
   Serial.println(wifiSsid);
 }
