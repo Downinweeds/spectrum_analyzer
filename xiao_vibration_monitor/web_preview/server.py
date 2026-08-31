@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "xiao_vibration_monitor.ino"
 
 sensitivity = 50
+avg_window = 1.0
 t0 = time.time()
+hist: list[float] = []
 
 
 def extract_html(symbol: str) -> str:
@@ -42,12 +44,22 @@ def mock_status() -> dict:
     chatter = 3 + 2 * abs(math.sin(elapsed * 7.0))
     raw = int(40 + chatter * 3 + knock * 8)
     amplitude = int(min(100, chatter + knock * (sensitivity / 50.0)))
+    hist.append(float(amplitude))
+    if len(hist) > 400:
+        del hist[: len(hist) - 400]
+    n = max(1, int(round(avg_window / 0.25))) if avg_window > 0 else 1
+    if avg_window <= 0:
+        smoothed = amplitude
+    else:
+        window = hist[-n:]
+        smoothed = int(round(sum(window) / len(window)))
     return {
-        "amplitude": amplitude,
-        "peak": max(amplitude, int(knock + 18)),
+        "amplitude": smoothed,
+        "peak": max(smoothed, int(knock + 18)),
         "raw": raw,
-        "detected": amplitude >= 12,
+        "detected": smoothed >= 12,
         "sensitivity": sensitivity,
+        "avgWindow": round(avg_window, 1),
         "ssid": "Workshop-WiFi",
         "ip": "192.168.1.42",
         "mdns": "http://vibemonitor.local",
@@ -88,12 +100,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
-        global sensitivity
+        global sensitivity, avg_window
         parsed = urlparse(self.path)
         if parsed.path == "/api/sensitivity":
             qs = parse_qs(parsed.query)
             if "value" in qs:
                 sensitivity = max(10, min(100, int(qs["value"][0])))
+            self._send(200, b"ok", "text/plain")
+            return
+        if parsed.path == "/api/avgwindow":
+            qs = parse_qs(parsed.query)
+            if "value" in qs:
+                avg_window = max(0.0, min(10.0, float(qs["value"][0])))
             self._send(200, b"ok", "text/plain")
             return
         if parsed.path == "/wifi/save":

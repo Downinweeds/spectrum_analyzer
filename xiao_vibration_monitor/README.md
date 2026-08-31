@@ -57,7 +57,7 @@ After upload the OLED should move past `starting...` to **Wi-Fi setup** (join ph
 6. On the OLED, read the IP address (for example `192.168.1.42`).
 7. On the phone browser open that IP, or try `http://vibemonitor.local`.
 
-The page shows live amplitude (0–100), a DETECTED / QUIET badge, a short history graph, and a sensitivity slider.
+The page shows live amplitude (0–100), a DETECTED / QUIET badge, a short history graph, a sensitivity slider, and an **average window** slider (0–10 seconds). 0 s is instant; longer windows smooth the OLED and phone percent.
 
 ## Using it later
 

@@ -115,6 +115,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
     <label>Sensitivity <span id="sensVal">50</span></label>
     <input id="sens" type="range" min="10" max="100" value="50">
   </section>
+  <section class="card">
+    <label>Average window <span id="avgVal">1.0 s</span></label>
+    <input id="avgWin" type="range" min="0" max="10" step="0.1" value="1">
+  </section>
   <div class="row">
     <span id="ip"></span>
     <span id="rssi"></span>
@@ -151,6 +155,12 @@ function draw() {
   ctx.stroke();
 }
 
+function fmtWin(v) {
+  const n = Number(v);
+  if (n <= 0) return "0 s (instant)";
+  return n.toFixed(1) + " s";
+}
+
 function apply(d) {
   document.getElementById("amp").textContent = d.amplitude;
   document.getElementById("peak").textContent = d.peak;
@@ -163,9 +173,13 @@ function apply(d) {
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";
-  if (typeof d.sensitivity === "number") {
+  if (typeof d.sensitivity === "number" && document.activeElement !== document.getElementById("sens")) {
     document.getElementById("sens").value = d.sensitivity;
     document.getElementById("sensVal").textContent = d.sensitivity;
+  }
+  if (typeof d.avgWindow === "number" && document.activeElement !== document.getElementById("avgWin")) {
+    document.getElementById("avgWin").value = d.avgWindow;
+    document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
   hist.push(d.amplitude);
   if (hist.length > 48) hist.shift();
@@ -181,10 +195,17 @@ async function tick() {
   }
 }
 
+document.getElementById("sens").addEventListener("input", (ev) => {
+  document.getElementById("sensVal").textContent = ev.target.value;
+});
 document.getElementById("sens").addEventListener("change", async (ev) => {
-  const v = ev.target.value;
-  document.getElementById("sensVal").textContent = v;
-  await fetch("/api/sensitivity?value=" + v, { method: "POST" });
+  await fetch("/api/sensitivity?value=" + ev.target.value, { method: "POST" });
+});
+document.getElementById("avgWin").addEventListener("input", (ev) => {
+  document.getElementById("avgVal").textContent = fmtWin(ev.target.value);
+});
+document.getElementById("avgWin").addEventListener("change", async (ev) => {
+  await fetch("/api/avgwindow?value=" + ev.target.value, { method: "POST" });
 });
 
 setInterval(tick, 250);

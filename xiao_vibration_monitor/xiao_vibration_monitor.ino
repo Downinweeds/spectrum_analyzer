@@ -141,6 +141,10 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
     <label>Sensitivity <span id="sensVal">50</span></label>
     <input id="sens" type="range" min="10" max="100" value="50">
   </section>
+  <section class="card">
+    <label>Average window <span id="avgVal">1.0 s</span></label>
+    <input id="avgWin" type="range" min="0" max="10" step="0.1" value="1">
+  </section>
   <div class="row">
     <span id="ip"></span>
     <span id="rssi"></span>
@@ -177,6 +181,12 @@ function draw() {
   ctx.stroke();
 }
 
+function fmtWin(v) {
+  const n = Number(v);
+  if (n <= 0) return "0 s (instant)";
+  return n.toFixed(1) + " s";
+}
+
 function apply(d) {
   document.getElementById("amp").textContent = d.amplitude;
   document.getElementById("peak").textContent = d.peak;
@@ -189,9 +199,13 @@ function apply(d) {
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";
-  if (typeof d.sensitivity === "number") {
+  if (typeof d.sensitivity === "number" && document.activeElement !== document.getElementById("sens")) {
     document.getElementById("sens").value = d.sensitivity;
     document.getElementById("sensVal").textContent = d.sensitivity;
+  }
+  if (typeof d.avgWindow === "number" && document.activeElement !== document.getElementById("avgWin")) {
+    document.getElementById("avgWin").value = d.avgWindow;
+    document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
   hist.push(d.amplitude);
   if (hist.length > 48) hist.shift();
@@ -207,10 +221,17 @@ async function tick() {
   }
 }
 
+document.getElementById("sens").addEventListener("input", (ev) => {
+  document.getElementById("sensVal").textContent = ev.target.value;
+});
 document.getElementById("sens").addEventListener("change", async (ev) => {
-  const v = ev.target.value;
-  document.getElementById("sensVal").textContent = v;
-  await fetch("/api/sensitivity?value=" + v, { method: "POST" });
+  await fetch("/api/sensitivity?value=" + ev.target.value, { method: "POST" });
+});
+document.getElementById("avgWin").addEventListener("input", (ev) => {
+  document.getElementById("avgVal").textContent = fmtWin(ev.target.value);
+});
+document.getElementById("avgWin").addEventListener("change", async (ev) => {
+  await fetch("/api/avgwindow?value=" + ev.target.value, { method: "POST" });
 });
 
 setInterval(tick, 250);
@@ -360,6 +381,7 @@ const uint32_t WIFI_CONNECT_MS = 20000;
 const uint32_t SAMPLE_PERIOD_MS = 20;
 const uint32_t OLED_PERIOD_MS = 120;
 const int SAMPLE_COUNT = 80;
+const int AVG_MAX_SAMPLES = 500;  // 10 s at 20 ms
 
 enum RunMode : uint8_t { MODE_PORTAL, MODE_CONNECTING, MODE_RUN };
 
@@ -376,7 +398,8 @@ bool mdnsStarted = false;
 bool serverStarted = false;
 
 int sensitivity = 50;     // 10..100, higher = more sensitive
-int amplitude = 0;        // 0..100 relative
+float avgWindowSec = 1.0f;  // 0..10 s moving average (0 = instant)
+int amplitude = 0;        // 0..100 relative (after averaging)
 int peakAmplitude = 0;
 int lastRawP2P = 0;
 bool detected = false;
@@ -384,6 +407,9 @@ uint32_t peakStamp = 0;
 
 float noiseFloor = 40.0f;
 float recentMax = 220.0f;
+float avgBuf[AVG_MAX_SAMPLES];
+uint16_t avgHead = 0;
+uint16_t avgCount = 0;
 
 uint32_t lastSample = 0;
 uint32_t lastOled = 0;
@@ -408,8 +434,10 @@ void handleWifiSave();
 void handleApiStatus();
 void handleApiScan();
 void handleApiSensitivity();
+void handleApiAvgWindow();
 void handleCaptive();
 bool bootButtonHeld();
+float averagedAmplitude(float instant);
 
 void setup() {
   Serial.begin(115200);
@@ -431,6 +459,9 @@ void setup() {
   wifiSsid = prefs.getString("ssid", "");
   wifiPass = prefs.getString("pass", "");
   sensitivity = constrain(prefs.getInt("sens", 50), 10, 100);
+  avgWindowSec = prefs.getFloat("avgWin", 1.0f);
+  if (avgWindowSec < 0.0f) avgWindowSec = 0.0f;
+  if (avgWindowSec > 10.0f) avgWindowSec = 10.0f;
 
   setupServer();  // routes only; listen after Wi-Fi is up
 
@@ -510,6 +541,28 @@ bool bootButtonHeld() {
   return held;
 }
 
+float averagedAmplitude(float instant) {
+  avgBuf[avgHead] = instant;
+  avgHead++;
+  if (avgHead >= AVG_MAX_SAMPLES) avgHead = 0;
+  if (avgCount < AVG_MAX_SAMPLES) avgCount++;
+
+  int n = (int)lroundf(avgWindowSec * (1000.0f / (float)SAMPLE_PERIOD_MS));
+  if (n <= 0) return instant;
+  if (n > AVG_MAX_SAMPLES) n = AVG_MAX_SAMPLES;
+  if (n > (int)avgCount) n = avgCount;
+  if (n <= 0) return instant;
+
+  float sum = 0.0f;
+  int idx = (int)avgHead;
+  for (int i = 0; i < n; i++) {
+    idx--;
+    if (idx < 0) idx += AVG_MAX_SAMPLES;
+    sum += avgBuf[idx];
+  }
+  return sum / (float)n;
+}
+
 void sampleVibration() {
   int mn = 4095;
   int mx = 0;
@@ -534,7 +587,8 @@ void sampleVibration() {
   recentMax = fmaxf(recentMax * 0.997f, fmaxf(180.0f, (float)lastRawP2P));
   const float gain = sensitivity / 50.0f;
   const float scale = fmaxf(160.0f, recentMax * 0.80f);
-  amplitude = constrain((int)lroundf(excess * gain * 100.0f / scale), 0, 100);
+  const float instant = constrain(excess * gain * 100.0f / scale, 0.0f, 100.0f);
+  amplitude = constrain((int)lroundf(averagedAmplitude(instant)), 0, 100);
 
   const int detectAt = map(sensitivity, 10, 100, 22, 6);
   if (amplitude >= detectAt) {
@@ -638,6 +692,7 @@ void setupServer() {
   server.on("/api/status", handleApiStatus);
   server.on("/api/scan", handleApiScan);
   server.on("/api/sensitivity", HTTP_POST, handleApiSensitivity);
+  server.on("/api/avgwindow", HTTP_POST, handleApiAvgWindow);
 
   // Captive-portal OS probes
   server.on("/generate_204", handleCaptive);
@@ -730,6 +785,7 @@ void handleApiStatus() {
   json += ",\"detected\":";
   json += detected ? "true" : "false";
   json += ",\"sensitivity\":" + String(sensitivity);
+  json += ",\"avgWindow\":" + String(avgWindowSec, 1);
   json += ",\"ssid\":\"" + jsonEscape(WiFi.SSID()) + "\"";
   json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   json += ",\"mdns\":\"http://";
@@ -762,6 +818,19 @@ void handleApiSensitivity() {
   }
   sensitivity = constrain(server.arg("value").toInt(), 10, 100);
   prefs.putInt("sens", sensitivity);
+  server.send(200, "text/plain", "ok");
+}
+
+void handleApiAvgWindow() {
+  if (!server.hasArg("value")) {
+    server.send(400, "text/plain", "missing value");
+    return;
+  }
+  float v = server.arg("value").toFloat();
+  if (v < 0.0f) v = 0.0f;
+  if (v > 10.0f) v = 10.0f;
+  avgWindowSec = roundf(v * 10.0f) / 10.0f;
+  prefs.putFloat("avgWin", avgWindowSec);
   server.send(200, "text/plain", "ok");
 }
 
