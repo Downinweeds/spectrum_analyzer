@@ -43,9 +43,9 @@ On the Expansion Board the **USER button shares D1**. That is fine for this sket
 5. Library Manager: install **U8g2** by oliver.
 6. Put **both** `xiao_vibration_monitor.ino` and `web_pages.h` in the same sketch folder, then open the `.ino` and upload.
 
-   Arduino IDE only sees extra files that sit next to the `.ino`. If you copied just the sketch, you will get `web_pages.h: No such file or directory`. Save `web_pages.h` here:
+The XIAO ESP32-C3 needs its **external antenna plugged into the U.FL connector**. Without it, Wi-Fi setup can stall.
 
-   `Documents\Arduino\xiao_vibration_monitor\web_pages.h`
+After upload the OLED should move past `starting...` to **Wi-Fi setup** (join phone network `VibeMonitor`) or **Connecting**. If it stays on `starting...`, close Arduino and reopen the sketch after a GitHub Desktop pull so you are not compiling an old copy.
 
 ## First-time Wi-Fi wizard (phone)
 
