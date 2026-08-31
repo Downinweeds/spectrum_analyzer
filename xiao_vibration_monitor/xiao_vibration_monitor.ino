@@ -521,10 +521,10 @@ void sampleVibration() {
   }
   if (noiseFloor < 12.0f) noiseFloor = 12.0f;
 
-  const float excess = max(0.0f, lastRawP2P - noiseFloor);
-  recentMax = max(recentMax * 0.997f, max(180.0f, lastRawP2P));
+  const float excess = fmaxf(0.0f, (float)lastRawP2P - noiseFloor);
+  recentMax = fmaxf(recentMax * 0.997f, fmaxf(180.0f, (float)lastRawP2P));
   const float gain = sensitivity / 50.0f;
-  const float scale = max(160.0f, recentMax * 0.80f);
+  const float scale = fmaxf(160.0f, recentMax * 0.80f);
   amplitude = constrain((int)lroundf(excess * gain * 100.0f / scale), 0, 100);
 
   const int detectAt = map(sensitivity, 10, 100, 22, 6);
@@ -539,7 +539,7 @@ void sampleVibration() {
     peakAmplitude = amplitude;
     peakStamp = millis();
   } else if (millis() - peakStamp > 2000) {
-    peakAmplitude = max(0, (int)lroundf(peakAmplitude * 0.96f));
+    peakAmplitude = (int)fmaxf(0.0f, peakAmplitude * 0.96f);
   }
 }
 
