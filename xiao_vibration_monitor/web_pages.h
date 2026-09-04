@@ -168,8 +168,13 @@ function apply(d) {
   document.getElementById("fill").style.width = d.amplitude + "%";
   document.getElementById("amp").style.color = colorFor(d.amplitude);
   const pill = document.getElementById("pill");
-  pill.textContent = d.detected ? "DETECTED" : "QUIET";
-  pill.className = "pill" + (d.detected ? " hot" : "");
+  if (d.calibrated) {
+    pill.textContent = d.machineOn ? "ON" : "OFF";
+    pill.className = "pill" + (d.machineOn ? " hot" : "");
+  } else {
+    pill.textContent = d.detected ? "DETECTED" : "QUIET";
+    pill.className = "pill" + (d.detected ? " hot" : "");
+  }
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";

@@ -6,6 +6,7 @@
     Piezo on D1 (A1 / GPIO3)  — peak-to-peak analog
     OLED 128x64 SSD1306 on I2C (SDA=D4, SCL=D5)
     Expansion USER button is also D1. Hold it at boot to force the Wi-Fi wizard.
+    Hold CAL on D0 (Grove A0) to GND at runtime to run dryer ON/OFF calibration.
 
   Libraries (Library Manager)
     U8g2  by oliver
@@ -19,6 +20,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <stdlib.h>
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <WiFi.h>
@@ -194,8 +196,13 @@ function apply(d) {
   document.getElementById("fill").style.width = d.amplitude + "%";
   document.getElementById("amp").style.color = colorFor(d.amplitude);
   const pill = document.getElementById("pill");
-  pill.textContent = d.detected ? "DETECTED" : "QUIET";
-  pill.className = "pill" + (d.detected ? " hot" : "");
+  if (d.calibrated) {
+    pill.textContent = d.machineOn ? "ON" : "OFF";
+    pill.className = "pill" + (d.machineOn ? " hot" : "");
+  } else {
+    pill.textContent = d.detected ? "DETECTED" : "QUIET";
+    pill.className = "pill" + (d.detected ? " hot" : "");
+  }
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";
@@ -360,6 +367,9 @@ body{font-family:-apple-system,sans-serif;background:#0b1020;color:#eef2ff;paddi
 )html";
 
 // ---- pins (XIAO ESP32-C3) ----
+#ifndef D0
+#define D0 2
+#endif
 #ifndef D1
 #define D1 3
 #endif
@@ -371,6 +381,7 @@ body{font-family:-apple-system,sans-serif;background:#0b1020;color:#eef2ff;paddi
 #endif
 
 const int PIEZO_PIN = D1;   // GPIO3, ADC1_CH3
+const int CAL_PIN = D0;     // GPIO2, hold LOW to start calibration
 const int PIN_SDA = D4;     // GPIO6
 const int PIN_SCL = D5;     // GPIO7
 
@@ -380,8 +391,12 @@ const char* MDNS_NAME = "vibemonitor";
 const uint32_t WIFI_CONNECT_MS = 20000;
 const uint32_t SAMPLE_PERIOD_MS = 20;
 const uint32_t OLED_PERIOD_MS = 120;
+const uint32_t CAL_HOLD_MS = 800;
+const uint32_t CAL_PREP_MS = 8000;
+const uint32_t CAL_CAPTURE_MS = 10000;
 const int SAMPLE_COUNT = 80;
 const int AVG_MAX_SAMPLES = 500;  // 10 s at 20 ms
+const int CAL_MAX_SAMPLES = 500;
 
 enum RunMode : uint8_t { MODE_PORTAL, MODE_CONNECTING, MODE_RUN };
 
@@ -410,6 +425,19 @@ float recentMax = 220.0f;
 float avgBuf[AVG_MAX_SAMPLES];
 uint16_t avgHead = 0;
 uint16_t avgCount = 0;
+float rawSmooth = 0.0f;
+
+bool calValid = false;
+bool machineOn = false;
+bool calibrating = false;
+float calOnMean = 0;
+float calOnP90 = 0;
+float calOffMean = 0;
+float calOffP90 = 0;
+float calOnThresh = 0;
+float calOffThresh = 0;
+uint32_t calLowSince = 0;
+bool calArmed = true;
 
 uint32_t lastSample = 0;
 uint32_t lastOled = 0;
@@ -438,6 +466,16 @@ void handleApiAvgWindow();
 void handleCaptive();
 bool bootButtonHeld();
 float averagedAmplitude(float instant);
+int readPiezoP2P();
+void waitWithNet(uint32_t ms);
+void pollCalibrationTrigger();
+void runCalibration();
+void captureCalPhase(const char* title, float* meanOut, float* p90Out);
+void applyCalibration(float onMean, float onP90, float offMean, float offP90);
+void loadCalibration();
+void saveCalibration();
+void updateMachineState();
+int cmpInt(const void* a, const void* b);
 
 void setup() {
   Serial.begin(115200);
@@ -447,6 +485,7 @@ void setup() {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
   pinMode(PIEZO_PIN, INPUT);
+  pinMode(CAL_PIN, INPUT_PULLUP);
 
   Wire.begin(PIN_SDA, PIN_SCL);
   u8g2.begin();
@@ -462,6 +501,7 @@ void setup() {
   avgWindowSec = prefs.getFloat("avgWin", 1.0f);
   if (avgWindowSec < 0.0f) avgWindowSec = 0.0f;
   if (avgWindowSec > 10.0f) avgWindowSec = 10.0f;
+  loadCalibration();
 
   setupServer();  // routes only; listen after Wi-Fi is up
 
@@ -481,6 +521,8 @@ void setup() {
 }
 
 void loop() {
+  pollCalibrationTrigger();
+
   server.handleClient();
   if (mode == MODE_PORTAL) {
     dnsServer.processNextRequest();
@@ -504,12 +546,12 @@ void loop() {
     }
   }
 
-  if (millis() - lastSample >= SAMPLE_PERIOD_MS) {
+  if (!calibrating && millis() - lastSample >= SAMPLE_PERIOD_MS) {
     lastSample = millis();
     sampleVibration();
   }
 
-  if (millis() - lastOled >= OLED_PERIOD_MS) {
+  if (!calibrating && millis() - lastOled >= OLED_PERIOD_MS) {
     lastOled = millis();
     if (mode == MODE_PORTAL) drawPortalScreen();
     else if (mode == MODE_CONNECTING) drawConnectingScreen();
@@ -520,6 +562,8 @@ void loop() {
     const char c = Serial.read();
     if (c == 'w' || c == 'W') {
       startPortal();
+    } else if (c == 'k' || c == 'K') {
+      runCalibration();
     } else if (c == 'c' || c == 'C') {
       prefs.remove("ssid");
       prefs.remove("pass");
@@ -539,6 +583,182 @@ bool bootButtonHeld() {
   }
   pinMode(PIEZO_PIN, INPUT);
   return held;
+}
+
+int cmpInt(const void* a, const void* b) {
+  return (*(const int*)a) - (*(const int*)b);
+}
+
+int readPiezoP2P() {
+  int mn = 4095;
+  int mx = 0;
+  for (int i = 0; i < SAMPLE_COUNT; i++) {
+    const int v = analogRead(PIEZO_PIN);
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+    delayMicroseconds(120);
+  }
+  return mx - mn;
+}
+
+void waitWithNet(uint32_t ms) {
+  const uint32_t start = millis();
+  while (millis() - start < ms) {
+    server.handleClient();
+    if (mode == MODE_PORTAL) dnsServer.processNextRequest();
+    delay(5);
+  }
+}
+
+void pollCalibrationTrigger() {
+  if (calibrating) return;
+  if (digitalRead(CAL_PIN) == LOW) {
+    if (calLowSince == 0) calLowSince = millis();
+    if (calArmed && (millis() - calLowSince >= CAL_HOLD_MS)) {
+      calArmed = false;
+      runCalibration();
+    }
+  } else {
+    calLowSince = 0;
+    calArmed = true;
+  }
+}
+
+void captureCalPhase(const char* title, float* meanOut, float* p90Out) {
+  int samples[CAL_MAX_SAMPLES];
+  int n = 0;
+  const uint32_t start = millis();
+
+  while (n < CAL_MAX_SAMPLES && (millis() - start) < CAL_CAPTURE_MS) {
+    samples[n++] = readPiezoP2P();
+    if ((n & 7) == 0) {
+      const int pct = (int)((millis() - start) * 100 / CAL_CAPTURE_MS);
+      char line[20];
+      snprintf(line, sizeof(line), "%d%%", pct > 100 ? 100 : pct);
+      showStatus(title, "sampling...", line);
+      server.handleClient();
+      if (mode == MODE_PORTAL) dnsServer.processNextRequest();
+    }
+  }
+  if (n < 1) n = 1;
+
+  long sum = 0;
+  for (int i = 0; i < n; i++) sum += samples[i];
+  qsort(samples, n, sizeof(int), cmpInt);
+  *meanOut = (float)sum / (float)n;
+  *p90Out = (float)samples[(n * 9) / 10];
+  if (*p90Out < *meanOut) *p90Out = *meanOut;
+}
+
+void applyCalibration(float onMean, float onP90, float offMean, float offP90) {
+  calOnMean = onMean;
+  calOnP90 = onP90;
+  calOffMean = offMean;
+  calOffP90 = offP90;
+
+  const float onLevel = fmaxf(onMean, onP90);
+  const float offLevel = fmaxf(offMean, offP90);
+  float mid = (onLevel + offLevel) * 0.5f;
+  float span = onLevel - offLevel;
+  if (span < 8.0f) span = 8.0f;
+  const float hyst = fmaxf(4.0f, span * 0.18f);
+  calOnThresh = mid + hyst * 0.35f;
+  calOffThresh = mid - hyst * 0.35f;
+  if (calOnThresh <= calOffThresh) {
+    calOnThresh = offLevel + 6.0f;
+    calOffThresh = offLevel + 2.0f;
+  }
+  calValid = true;
+}
+
+void saveCalibration() {
+  prefs.putBool("calOk", calValid);
+  prefs.putFloat("onMean", calOnMean);
+  prefs.putFloat("onP90", calOnP90);
+  prefs.putFloat("offMean", calOffMean);
+  prefs.putFloat("offP90", calOffP90);
+  prefs.putFloat("onTh", calOnThresh);
+  prefs.putFloat("offTh", calOffThresh);
+}
+
+void loadCalibration() {
+  calValid = prefs.getBool("calOk", false);
+  if (!calValid) return;
+  calOnMean = prefs.getFloat("onMean", 0);
+  calOnP90 = prefs.getFloat("onP90", 0);
+  calOffMean = prefs.getFloat("offMean", 0);
+  calOffP90 = prefs.getFloat("offP90", 0);
+  calOnThresh = prefs.getFloat("onTh", 0);
+  calOffThresh = prefs.getFloat("offTh", 0);
+}
+
+void runCalibration() {
+  calibrating = true;
+  Serial.println("Calibration started");
+
+  for (int s = (int)(CAL_PREP_MS / 1000); s >= 1; s--) {
+    char line[20];
+    snprintf(line, sizeof(line), "in %d s", s);
+    showStatus("Turn Machine On", line, "then wait");
+    waitWithNet(1000);
+  }
+
+  float onMean = 0, onP90 = 0;
+  captureCalPhase("Turn Machine On", &onMean, &onP90);
+
+  for (int s = (int)(CAL_PREP_MS / 1000); s >= 1; s--) {
+    char line[20];
+    snprintf(line, sizeof(line), "in %d s", s);
+    showStatus("Turn Machine Off", line, "then wait");
+    waitWithNet(1000);
+  }
+
+  float offMean = 0, offP90 = 0;
+  captureCalPhase("Turn Machine Off", &offMean, &offP90);
+
+  if (onP90 < offP90) {
+    const float tm = onMean, tp = onP90;
+    onMean = offMean;
+    onP90 = offP90;
+    offMean = tm;
+    offP90 = tp;
+    Serial.println("Cal levels swapped (ON was quieter than OFF)");
+  }
+
+  applyCalibration(onMean, onP90, offMean, offP90);
+  saveCalibration();
+  machineOn = false;
+  rawSmooth = offMean;
+
+  Serial.print("Cal ON mean/p90 ");
+  Serial.print(onMean);
+  Serial.print("/");
+  Serial.println(onP90);
+  Serial.print("Cal OFF mean/p90 ");
+  Serial.print(offMean);
+  Serial.print("/");
+  Serial.println(offP90);
+
+  if (onP90 <= offP90 + 6.0f) {
+    showStatus("Calibration", "Complete", "weak contrast");
+  } else {
+    showStatus("Calibration", "Complete", "");
+  }
+  waitWithNet(2500);
+  calibrating = false;
+}
+
+void updateMachineState() {
+  const float tauSec = fmaxf(2.5f, avgWindowSec);
+  const float alpha = 1.0f - expf(-((float)SAMPLE_PERIOD_MS) / (tauSec * 1000.0f));
+  rawSmooth = rawSmooth + alpha * ((float)lastRawP2P - rawSmooth);
+
+  if (!calValid) return;
+  if (machineOn) {
+    if (rawSmooth < calOffThresh) machineOn = false;
+  } else if (rawSmooth > calOnThresh) {
+    machineOn = true;
+  }
 }
 
 float averagedAmplitude(float instant) {
@@ -564,16 +784,7 @@ float averagedAmplitude(float instant) {
 }
 
 void sampleVibration() {
-  int mn = 4095;
-  int mx = 0;
-  for (int i = 0; i < SAMPLE_COUNT; i++) {
-    const int v = analogRead(PIEZO_PIN);
-    if (v < mn) mn = v;
-    if (v > mx) mx = v;
-    delayMicroseconds(120);
-  }
-
-  lastRawP2P = mx - mn;
+  lastRawP2P = readPiezoP2P();
 
   // Slow-rising noise floor so idle chatter is ignored.
   if (lastRawP2P < noiseFloor) {
@@ -604,6 +815,8 @@ void sampleVibration() {
   } else if (millis() - peakStamp > 2000) {
     peakAmplitude = (int)fmaxf(0.0f, peakAmplitude * 0.96f);
   }
+
+  updateMachineState();
 }
 
 void showBootScreen() {
@@ -659,9 +872,13 @@ void drawRunScreen() {
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 10, "VIBRATION");
+  u8g2.drawStr(0, 10, "DRYER");
   u8g2.setFont(u8g2_font_5x8_tf);
-  u8g2.drawStr(detected ? 78 : 92, 10, detected ? "DETECT" : "quiet");
+  if (calValid) {
+    u8g2.drawStr(machineOn ? 88 : 96, 10, machineOn ? "ON" : "OFF");
+  } else {
+    u8g2.drawStr(64, 10, "cal needed");
+  }
 
   u8g2.setFont(u8g2_font_logisoso24_tn);
   const int nw = u8g2.getStrWidth(num);
@@ -786,6 +1003,10 @@ void handleApiStatus() {
   json += detected ? "true" : "false";
   json += ",\"sensitivity\":" + String(sensitivity);
   json += ",\"avgWindow\":" + String(avgWindowSec, 1);
+  json += ",\"calibrated\":";
+  json += calValid ? "true" : "false";
+  json += ",\"machineOn\":";
+  json += machineOn ? "true" : "false";
   json += ",\"ssid\":\"" + jsonEscape(WiFi.SSID()) + "\"";
   json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   json += ",\"mdns\":\"http://";

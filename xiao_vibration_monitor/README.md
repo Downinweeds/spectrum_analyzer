@@ -29,7 +29,7 @@ On the Expansion Board the **USER button shares D1**. That is fine for this sket
 
 - Do not hold the USER button while you are measuring vibration.
 - **Hold USER while you tap RESET** if you want to force the Wi-Fi wizard (for example after moving to a new network).
-- If the button bothers the readings, move the piezo to the Grove **A0/D0** connector and change `PIEZO_PIN` in the sketch from `D1` to `D0`.
+- If the button bothers the readings, move the piezo to another analog pin and change `PIEZO_PIN`. Do not use D0 — that is the calibration trigger.
 
 ## Arduino IDE setup
 
@@ -64,6 +64,21 @@ The page shows live amplitude (0–100), a DETECTED / QUIET badge, a short histo
 - Same Wi-Fi: just power on and open the IP or `http://vibemonitor.local`.
 - New location: hold **USER** while resetting, or open `/wifi` on the dashboard, or type `w` in the Serial Monitor (115200 baud).
 - Type `c` in Serial Monitor to erase the saved network.
+- Type `k` in Serial Monitor to start dryer calibration.
+
+## Dryer ON/OFF calibration
+
+The piezo should be firmly attached to the dryer housing. Calibration learns the vibration of **running** vs **stopped** and stores it in flash until you run it again.
+
+1. Wire a momentary button or jumper from **D0** (Grove A0 on the expansion board) to **GND**.
+2. With the sketch running, **hold D0 low** for about one second.
+3. OLED: **Turn Machine On** — start the dryer, wait through the countdown, then it samples for 10 seconds.
+4. OLED: **Turn Machine Off** — stop the dryer, wait, then it samples the quiet state for 10 seconds.
+5. OLED: **Calibration Complete**. Thresholds are saved.
+
+After that the OLED shows **DRYER ON** or **DRYER OFF** (and **cal needed** until the first successful calibration). The phone badge matches. Hold D0 low again to recapture.
+
+Use a long **Average window** (2–5 s) so tumble pauses do not flicker the state.
 
 ## OLED
 
@@ -71,7 +86,8 @@ The page shows live amplitude (0–100), a DETECTED / QUIET badge, a short histo
 | --- | --- |
 | Wi-Fi setup | Join AP `VibeMonitor`, then open `192.168.4.1` |
 | Connecting | Joining the saved network |
-| VIBRATION + bar + IP | Live relative amplitude (0–100%) |
+| DRYER ON/OFF + bar + IP | Calibrated machine state and live % |
+| cal needed | Run the D0 calibration routine |
 
 If the OLED is upside down, change `u8g2.setFlipMode(1)` to `0` in `setup()`.
 
@@ -85,3 +101,4 @@ The sketch measures **peak-to-peak** over a short window, subtracts a slow noise
 | --- | --- |
 | `w` | Open the Wi-Fi wizard |
 | `c` | Forget saved SSID/password |
+| `k` | Start dryer ON/OFF calibration |
