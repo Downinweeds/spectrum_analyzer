@@ -70,15 +70,19 @@ The page shows live amplitude (0–100), a DETECTED / QUIET badge, a short histo
 
 The piezo should be firmly attached to the dryer housing. Calibration learns the vibration of **running** vs **stopped** and stores it in flash until you run it again.
 
-Do not use **D0** for this button. D0 is GPIO2 (ADC1), and piezo sampling on D1 can make D0 read as LOW, which used to start calibration at boot.
+Do not use **D0** for the cal button. D0 is GPIO2 (ADC1), and piezo sampling on D1 can make D0 read LOW.
+
+1. Wire a momentary button or jumper from **D10** to **GND** (MOSI pad; leave the expansion SD slot empty).
 2. With the sketch running, **hold D10 low** for about one second.
-3. OLED: **Turn Machine On** — start the dryer, wait through the countdown, then it samples for 10 seconds.
-4. OLED: **Turn Machine Off** — stop the dryer, wait, then it samples the quiet state for 10 seconds.
+3. OLED: **START dryer NOW** — start it immediately. The countdown is time for the drum to be running before sampling. Keep it tumbling through **Keep dryer ON / sampling**.
+4. OLED: **STOP dryer NOW** — stop it immediately and let it settle through the countdown, then **Keep dryer OFF / sampling**.
 5. OLED: **Calibration Complete**. Thresholds are saved.
 
-After that the OLED shows **DRYER ON** or **DRYER OFF** (and **cal needed** until the first successful calibration). The phone badge matches. Hold D10 low again to recapture.
+If you wait until the countdown hits 0 to start or stop the dryer, that transition gets mixed into the sample and ON/OFF will be hard to tell apart.
 
-Use a long **Average window** (2–5 s) so tumble pauses do not flicker the state.
+**Sensitivity** and **Average window** do not change the numbers stored during calibration (those use raw piezo peak-to-peak). After calibration, ON/OFF detection also ignores those sliders. They only affect the live 0–100% display.
+
+After a good cal the OLED shows **DRYER ON** or **DRYER OFF** (**cal needed** until the first run). Hold D10 low again to recapture. Serial `k` starts the same routine.
 
 ## OLED
 
