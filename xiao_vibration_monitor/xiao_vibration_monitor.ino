@@ -432,6 +432,7 @@ float avgBuf[AVG_MAX_SAMPLES];
 uint16_t avgHead = 0;
 uint16_t avgCount = 0;
 float rawSmooth = 0.0f;
+float rawFast = 0.0f;
 
 bool calValid = false;
 bool machineOn = false;
@@ -677,14 +678,14 @@ void applyCalibration(float onMean, float onP90, float offMean, float offP90) {
   calOffMean = offMean;
   calOffP90 = offP90;
 
-  const float onLevel = fmaxf(onMean, onP90);
-  const float offLevel = fmaxf(offMean, offP90);
-  float mid = (onLevel + offLevel) * 0.5f;
+  const float onLevel = (onMean * 0.65f) + (onP90 * 0.35f);
+  const float offLevel = (offMean * 0.5f) + (offP90 * 0.5f);
   float span = onLevel - offLevel;
   if (span < 8.0f) span = 8.0f;
-  const float hyst = fmaxf(4.0f, span * 0.18f);
-  calOnThresh = mid + hyst * 0.35f;
-  calOffThresh = mid - hyst * 0.35f;
+  // Sit closer to OFF than to ON peaks so a running dryer (mean, not p90)
+  // still crosses the ON line. Tumbling is bursty; p90-midpoint was too high.
+  calOnThresh = offLevel + span * 0.28f;
+  calOffThresh = offLevel + span * 0.12f;
   if (calOnThresh <= calOffThresh) {
     calOnThresh = offLevel + 6.0f;
     calOffThresh = offLevel + 2.0f;
@@ -719,23 +720,23 @@ void runCalibration() {
 
   for (int s = (int)(CAL_PREP_MS / 1000); s >= 1; s--) {
     char line[20];
-    snprintf(line, sizeof(line), "in %d s", s);
-    showStatus("Turn Machine On", line, "then wait");
+    snprintf(line, sizeof(line), "sample in %ds", s);
+    showStatus("START dryer NOW", line, "keep it running");
     waitWithNet(1000);
   }
 
   float onMean = 0, onP90 = 0;
-  captureCalPhase("Turn Machine On", &onMean, &onP90);
+  captureCalPhase("Keep dryer ON", &onMean, &onP90);
 
   for (int s = (int)(CAL_PREP_MS / 1000); s >= 1; s--) {
     char line[20];
-    snprintf(line, sizeof(line), "in %d s", s);
-    showStatus("Turn Machine Off", line, "then wait");
+    snprintf(line, sizeof(line), "sample in %ds", s);
+    showStatus("STOP dryer NOW", line, "let it settle");
     waitWithNet(1000);
   }
 
   float offMean = 0, offP90 = 0;
-  captureCalPhase("Turn Machine Off", &offMean, &offP90);
+  captureCalPhase("Keep dryer OFF", &offMean, &offP90);
 
   if (onP90 < offP90) {
     const float tm = onMean, tp = onP90;
@@ -750,6 +751,7 @@ void runCalibration() {
   saveCalibration();
   machineOn = false;
   rawSmooth = offMean;
+  rawFast = offMean;
 
   Serial.print("Cal ON mean/p90 ");
   Serial.print(onMean);
@@ -770,15 +772,18 @@ void runCalibration() {
 }
 
 void updateMachineState() {
-  const float tauSec = fmaxf(2.5f, avgWindowSec);
-  const float alpha = 1.0f - expf(-((float)SAMPLE_PERIOD_MS) / (tauSec * 1000.0f));
-  rawSmooth = rawSmooth + alpha * ((float)lastRawP2P - rawSmooth);
+  // Independent of the phone average-window slider. Fast attack so tumble
+  // bursts count as ON; slower release so a quiet tumble gap is not OFF.
+  const float aFast = 1.0f - expf(-((float)SAMPLE_PERIOD_MS) / 400.0f);
+  const float aSlow = 1.0f - expf(-((float)SAMPLE_PERIOD_MS) / 2500.0f);
+  rawFast = rawFast + aFast * ((float)lastRawP2P - rawFast);
+  rawSmooth = rawSmooth + aSlow * ((float)lastRawP2P - rawSmooth);
 
   if (!calValid) return;
-  if (machineOn) {
-    if (rawSmooth < calOffThresh) machineOn = false;
-  } else if (rawSmooth > calOnThresh) {
-    machineOn = true;
+  if (!machineOn) {
+    if (rawFast > calOnThresh || (float)lastRawP2P > calOnThresh) machineOn = true;
+  } else if (rawSmooth < calOffThresh) {
+    machineOn = false;
   }
 }
 
