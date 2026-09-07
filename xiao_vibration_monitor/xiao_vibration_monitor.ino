@@ -6,7 +6,7 @@
     Piezo on D1 (A1 / GPIO3)  — peak-to-peak analog
     OLED 128x64 SSD1306 on I2C (SDA=D4, SCL=D5)
     Expansion USER button is also D1. Hold it at boot to force the Wi-Fi wizard.
-    Hold CAL on D0 (Grove A0) to GND at runtime to run dryer ON/OFF calibration.
+    Hold CAL on D10 to GND at runtime to run dryer ON/OFF calibration.
 
   Libraries (Library Manager)
     U8g2  by oliver
@@ -28,6 +28,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include "driver/gpio.h"
 
 // Phone dashboard + Wi-Fi wizard HTML (keep these above setup()/loop()).
 static const char DASHBOARD_HTML[] PROGMEM = R"html(
@@ -379,9 +380,14 @@ body{font-family:-apple-system,sans-serif;background:#0b1020;color:#eef2ff;paddi
 #ifndef D5
 #define D5 7
 #endif
+#ifndef D10
+#define D10 10
+#endif
 
 const int PIEZO_PIN = D1;   // GPIO3, ADC1_CH3
-const int CAL_PIN = D0;     // GPIO2, hold LOW to start calibration
+// D0/GPIO2 is ADC1_CH2. analogRead() on D1 can leave D0 reading LOW, which
+// used to start calibration at boot. D10 is not an ADC pin.
+const int CAL_PIN = D10;    // GPIO10, hold LOW to start calibration
 const int PIN_SDA = D4;     // GPIO6
 const int PIN_SCL = D5;     // GPIO7
 
@@ -437,7 +443,7 @@ float calOffP90 = 0;
 float calOnThresh = 0;
 float calOffThresh = 0;
 uint32_t calLowSince = 0;
-bool calArmed = true;
+bool calSawIdleHigh = false;
 
 uint32_t lastSample = 0;
 uint32_t lastOled = 0;
@@ -475,6 +481,7 @@ void applyCalibration(float onMean, float onP90, float offMean, float offP90);
 void loadCalibration();
 void saveCalibration();
 void updateMachineState();
+void configureCalPin();
 int cmpInt(const void* a, const void* b);
 
 void setup() {
@@ -483,9 +490,9 @@ void setup() {
   Serial.println("\nVibeMonitor starting");
 
   analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);
+  analogSetPinAttenuation(PIEZO_PIN, ADC_11db);
   pinMode(PIEZO_PIN, INPUT);
-  pinMode(CAL_PIN, INPUT_PULLUP);
+  configureCalPin();
 
   Wire.begin(PIN_SDA, PIN_SCL);
   u8g2.begin();
@@ -610,17 +617,31 @@ void waitWithNet(uint32_t ms) {
   }
 }
 
+void configureCalPin() {
+  gpio_reset_pin((gpio_num_t)CAL_PIN);
+  pinMode(CAL_PIN, INPUT_PULLUP);
+  gpio_pullup_en((gpio_num_t)CAL_PIN);
+  gpio_pulldown_dis((gpio_num_t)CAL_PIN);
+}
+
 void pollCalibrationTrigger() {
   if (calibrating) return;
-  if (digitalRead(CAL_PIN) == LOW) {
-    if (calLowSince == 0) calLowSince = millis();
-    if (calArmed && (millis() - calLowSince >= CAL_HOLD_MS)) {
-      calArmed = false;
-      runCalibration();
-    }
-  } else {
+
+  // Require a HIGH idle, then a held LOW. A pin that boots LOW (failed
+  // pull-up, ADC leftover, or floating) must not start calibration.
+  if (digitalRead(CAL_PIN) == HIGH) {
+    calSawIdleHigh = true;
     calLowSince = 0;
-    calArmed = true;
+    return;
+  }
+
+  if (!calSawIdleHigh) return;
+
+  if (calLowSince == 0) calLowSince = millis();
+  if (millis() - calLowSince >= CAL_HOLD_MS) {
+    calSawIdleHigh = false;
+    calLowSince = 0;
+    runCalibration();
   }
 }
 
