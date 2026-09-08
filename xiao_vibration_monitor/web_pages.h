@@ -133,7 +133,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
   <section class="card">
     <label>iPhone alerts</label>
     <p class="hint">Install the free <b>ntfy</b> app, subscribe to a private topic name, then save it here. Leave blank to disable. The board must be on Wi-Fi.</p>
-    <input id="ntfy" type="text" maxlength="64" placeholder="my-dryer-secret-topic" autocomplete="off" autocapitalize="off">
+    <input id="ntfy" type="text" maxlength="64" placeholder="my-dryer-secret-topic" autocomplete="off" autocapitalize="off" spellcheck="false" name="ntfy-topic">
     <button type="button" id="saveNtfy">Save topic</button>
     <button type="button" class="ghost" id="testNtfy">Send test alert</button>
     <p class="hint" id="ntfyMsg"></p>
@@ -207,7 +207,10 @@ function apply(d) {
     document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
   if (!ntfyLoaded && typeof d.ntfyTopic === "string") {
-    document.getElementById("ntfy").value = d.ntfyTopic;
+    const el = document.getElementById("ntfy");
+    if (document.activeElement !== el) {
+      el.value = d.ntfyTopic;
+    }
     ntfyLoaded = true;
   }
   hist.push(d.amplitude);
