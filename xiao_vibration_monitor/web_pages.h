@@ -90,6 +90,17 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
   }
   .ghost { background: #222a42; color: var(--text); margin-top: 8px; }
   .row { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; color: var(--muted); }
+  .hint { color: var(--muted); font-size: .75rem; line-height: 1.4; margin: 0 0 8px; }
+  input[type=text] {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    padding: 12px;
+    font-size: 1rem;
+    background: #0e1424;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
 </style>
 </head>
 <body>
@@ -118,6 +129,14 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
   <section class="card">
     <label>Average window <span id="avgVal">1.0 s</span></label>
     <input id="avgWin" type="range" min="0" max="10" step="0.1" value="1">
+  </section>
+  <section class="card">
+    <label>iPhone alerts</label>
+    <p class="hint">Install the free <b>ntfy</b> app, subscribe to a private topic name, then save it here. Leave blank to disable. The board must be on Wi-Fi.</p>
+    <input id="ntfy" type="text" maxlength="64" placeholder="my-dryer-secret-topic" autocomplete="off" autocapitalize="off">
+    <button type="button" id="saveNtfy">Save topic</button>
+    <button type="button" class="ghost" id="testNtfy">Send test alert</button>
+    <p class="hint" id="ntfyMsg"></p>
   </section>
   <div class="row">
     <span id="ip"></span>
@@ -186,6 +205,9 @@ function apply(d) {
     document.getElementById("avgWin").value = d.avgWindow;
     document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
+  if (typeof d.ntfyTopic === "string" && document.activeElement !== document.getElementById("ntfy")) {
+    document.getElementById("ntfy").value = d.ntfyTopic;
+  }
   hist.push(d.amplitude);
   if (hist.length > 48) hist.shift();
   draw();
@@ -211,6 +233,16 @@ document.getElementById("avgWin").addEventListener("input", (ev) => {
 });
 document.getElementById("avgWin").addEventListener("change", async (ev) => {
   await fetch("/api/avgwindow?value=" + ev.target.value, { method: "POST" });
+});
+document.getElementById("saveNtfy").addEventListener("click", async () => {
+  const topic = document.getElementById("ntfy").value.trim();
+  const r = await fetch("/api/ntfy?topic=" + encodeURIComponent(topic), { method: "POST" });
+  document.getElementById("ntfyMsg").textContent = r.ok ? "Topic saved." : "Save failed.";
+});
+document.getElementById("testNtfy").addEventListener("click", async () => {
+  document.getElementById("ntfyMsg").textContent = "Sending…";
+  const r = await fetch("/api/ntfy-test", { method: "POST" });
+  document.getElementById("ntfyMsg").textContent = r.ok ? "Test sent. Check the ntfy app." : "Test failed. Save a topic and join Wi-Fi first.";
 });
 
 setInterval(tick, 250);

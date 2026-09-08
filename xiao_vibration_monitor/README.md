@@ -41,7 +41,7 @@ On the Expansion Board the **USER button shares D1**. That is fine for this sket
 3. Install **esp32** by Espressif, then select board **XIAO_ESP32C3** (or **Seeed XIAO ESP32C3**).
 4. Tools → **USB CDC On Boot: Enabled**.
 5. Library Manager: install **U8g2** by oliver.
-6. Put **both** `xiao_vibration_monitor.ino` and `web_pages.h` in the same sketch folder, then open the `.ino` and upload.
+6. Open `xiao_vibration_monitor.ino` and upload. The sketch is self-contained (HTML is inlined). `web_pages.h` is an optional copy of those pages and is **not** required to compile.
 
 The XIAO ESP32-C3 needs its **external antenna plugged into the U.FL connector**. Without it, Wi-Fi setup can stall.
 
@@ -83,6 +83,20 @@ If you wait until the countdown hits 0 to start or stop the dryer, that transiti
 **Sensitivity** and **Average window** do not change the numbers stored during calibration (those use raw piezo peak-to-peak). After calibration, ON/OFF detection also ignores those sliders. They only affect the live 0–100% display.
 
 After a good cal the OLED shows **DRYER ON** or **DRYER OFF** (**cal needed** until the first run). Hold D10 low again to recapture. Serial `k` starts the same routine.
+
+## iPhone alerts (ntfy)
+
+The board can push a notification when the calibrated dryer state stays ON or OFF for about 4 seconds after a change. It uses the free [ntfy](https://ntfy.sh) service — no Apple developer account, and nothing has to stay open in Safari.
+
+1. On the iPhone, install **ntfy** from the App Store.
+2. In the app, subscribe to a **private topic name** (treat it like a password: letters, numbers, `_`, `-` only; anyone who knows the name can send to it).
+3. Put the XIAO on your home Wi-Fi (not the `VibeMonitor` setup AP — that has no internet).
+4. Open the dashboard (`http://vibemonitor.local` or the IP on the OLED).
+5. Under **iPhone alerts**, enter the same topic, tap **Save topic**, then **Send test alert**.
+
+You should get “VibeMonitor test”. After that, “Dryer ON” / “Dryer OFF” fire on real state changes. Power-on and a fresh calibration do **not** send an alert for the first stable reading. Leave the topic blank and save to disable.
+
+The HTTPS POST to `ntfy.sh` takes a moment; the OLED may pause briefly when an alert goes out.
 
 ## OLED
 

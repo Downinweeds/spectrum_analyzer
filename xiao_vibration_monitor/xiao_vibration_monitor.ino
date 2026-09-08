@@ -1,6 +1,7 @@
 /*
   XIAO ESP32-C3 + Seeed Expansion Board
   Piezo vibration monitor with OLED + phone dashboard + Wi-Fi setup wizard.
+  Optional iPhone alerts via ntfy.sh when the dryer turns ON or OFF.
 
   Hardware
     Piezo on D1 (A1 / GPIO3)  — peak-to-peak analog
@@ -28,6 +29,8 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include "driver/gpio.h"
 
 // Phone dashboard + Wi-Fi wizard HTML (keep these above setup()/loop()).
@@ -119,6 +122,17 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
   }
   .ghost { background: #222a42; color: var(--text); margin-top: 8px; }
   .row { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; color: var(--muted); }
+  .hint { color: var(--muted); font-size: .75rem; line-height: 1.4; margin: 0 0 8px; }
+  input[type=text] {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    padding: 12px;
+    font-size: 1rem;
+    background: #0e1424;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
 </style>
 </head>
 <body>
@@ -147,6 +161,14 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
   <section class="card">
     <label>Average window <span id="avgVal">1.0 s</span></label>
     <input id="avgWin" type="range" min="0" max="10" step="0.1" value="1">
+  </section>
+  <section class="card">
+    <label>iPhone alerts</label>
+    <p class="hint">Install the free <b>ntfy</b> app, subscribe to a private topic name, then save it here. Leave blank to disable. The board must be on Wi-Fi.</p>
+    <input id="ntfy" type="text" maxlength="64" placeholder="my-dryer-secret-topic" autocomplete="off" autocapitalize="off">
+    <button type="button" id="saveNtfy">Save topic</button>
+    <button type="button" class="ghost" id="testNtfy">Send test alert</button>
+    <p class="hint" id="ntfyMsg"></p>
   </section>
   <div class="row">
     <span id="ip"></span>
@@ -215,6 +237,9 @@ function apply(d) {
     document.getElementById("avgWin").value = d.avgWindow;
     document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
+  if (typeof d.ntfyTopic === "string" && document.activeElement !== document.getElementById("ntfy")) {
+    document.getElementById("ntfy").value = d.ntfyTopic;
+  }
   hist.push(d.amplitude);
   if (hist.length > 48) hist.shift();
   draw();
@@ -240,6 +265,16 @@ document.getElementById("avgWin").addEventListener("input", (ev) => {
 });
 document.getElementById("avgWin").addEventListener("change", async (ev) => {
   await fetch("/api/avgwindow?value=" + ev.target.value, { method: "POST" });
+});
+document.getElementById("saveNtfy").addEventListener("click", async () => {
+  const topic = document.getElementById("ntfy").value.trim();
+  const r = await fetch("/api/ntfy?topic=" + encodeURIComponent(topic), { method: "POST" });
+  document.getElementById("ntfyMsg").textContent = r.ok ? "Topic saved." : "Save failed.";
+});
+document.getElementById("testNtfy").addEventListener("click", async () => {
+  document.getElementById("ntfyMsg").textContent = "Sending…";
+  const r = await fetch("/api/ntfy-test", { method: "POST" });
+  document.getElementById("ntfyMsg").textContent = r.ok ? "Test sent. Check the ntfy app." : "Test failed. Save a topic and join Wi-Fi first.";
 });
 
 setInterval(tick, 250);
@@ -446,6 +481,13 @@ float calOffThresh = 0;
 uint32_t calLowSince = 0;
 bool calSawIdleHigh = false;
 
+String ntfyTopic;
+bool alertHaveBaseline = false;
+bool alertPrevOn = false;
+bool alertPendingOn = false;
+uint32_t lastAlertCheckMs = 0;
+uint32_t lastAlertStableMs = 0;
+
 uint32_t lastSample = 0;
 uint32_t lastOled = 0;
 uint32_t detectHoldUntil = 0;
@@ -484,6 +526,12 @@ void saveCalibration();
 void updateMachineState();
 void configureCalPin();
 int cmpInt(const void* a, const void* b);
+String sanitizeNtfyTopic(const String& raw);
+bool sendNtfy(const char* title, const char* msg);
+void resetAlertBaseline();
+void pollAlerts();
+void handleApiNtfy();
+void handleApiNtfyTest();
 
 void setup() {
   Serial.begin(115200);
@@ -509,6 +557,7 @@ void setup() {
   avgWindowSec = prefs.getFloat("avgWin", 1.0f);
   if (avgWindowSec < 0.0f) avgWindowSec = 0.0f;
   if (avgWindowSec > 10.0f) avgWindowSec = 10.0f;
+  ntfyTopic = sanitizeNtfyTopic(prefs.getString("ntfy", ""));
   loadCalibration();
 
   setupServer();  // routes only; listen after Wi-Fi is up
@@ -557,6 +606,7 @@ void loop() {
   if (!calibrating && millis() - lastSample >= SAMPLE_PERIOD_MS) {
     lastSample = millis();
     sampleVibration();
+    pollAlerts();
   }
 
   if (!calibrating && millis() - lastOled >= OLED_PERIOD_MS) {
@@ -752,6 +802,7 @@ void runCalibration() {
   machineOn = false;
   rawSmooth = offMean;
   rawFast = offMean;
+  resetAlertBaseline();
 
   Serial.print("Cal ON mean/p90 ");
   Serial.print(onMean);
@@ -936,6 +987,8 @@ void setupServer() {
   server.on("/api/scan", handleApiScan);
   server.on("/api/sensitivity", HTTP_POST, handleApiSensitivity);
   server.on("/api/avgwindow", HTTP_POST, handleApiAvgWindow);
+  server.on("/api/ntfy", HTTP_POST, handleApiNtfy);
+  server.on("/api/ntfy-test", HTTP_POST, handleApiNtfyTest);
 
   // Captive-portal OS probes
   server.on("/generate_204", handleCaptive);
@@ -1039,6 +1092,7 @@ void handleApiStatus() {
   json += MDNS_NAME;
   json += ".local\"";
   json += ",\"rssi\":" + String(WiFi.RSSI());
+  json += ",\"ntfyTopic\":\"" + jsonEscape(ntfyTopic) + "\"";
   json += "}";
   server.send(200, "application/json", json);
 }
@@ -1079,6 +1133,112 @@ void handleApiAvgWindow() {
   avgWindowSec = roundf(v * 10.0f) / 10.0f;
   prefs.putFloat("avgWin", avgWindowSec);
   server.send(200, "text/plain", "ok");
+}
+
+String sanitizeNtfyTopic(const String& raw) {
+  String out;
+  out.reserve(raw.length());
+  for (size_t i = 0; i < raw.length() && out.length() < 64; i++) {
+    const char c = raw[i];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '_' || c == '-') {
+      out += c;
+    }
+  }
+  return out;
+}
+
+void resetAlertBaseline() {
+  alertHaveBaseline = false;
+  alertPrevOn = false;
+  alertPendingOn = false;
+  lastAlertStableMs = 0;
+}
+
+bool sendNtfy(const char* title, const char* msg) {
+  if (WiFi.status() != WL_CONNECTED || ntfyTopic.length() == 0) {
+    return false;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(6000);
+  const String url = String("https://ntfy.sh/") + ntfyTopic;
+  if (!http.begin(client, url)) {
+    Serial.println("ntfy: begin failed");
+    return false;
+  }
+  http.addHeader("Content-Type", "text/plain; charset=utf-8");
+  http.addHeader("Title", title);
+  http.addHeader("Tags", "bell");
+  const int code = http.POST(msg);
+  http.end();
+  Serial.printf("ntfy POST %d\n", code);
+  return code >= 200 && code < 300;
+}
+
+void pollAlerts() {
+  if (!calValid || calibrating || ntfyTopic.length() == 0) {
+    return;
+  }
+  if (mode != MODE_RUN || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  const uint32_t now = millis();
+  if (now - lastAlertCheckMs < 400) {
+    return;
+  }
+  lastAlertCheckMs = now;
+
+  if (machineOn != alertPendingOn || lastAlertStableMs == 0) {
+    alertPendingOn = machineOn;
+    lastAlertStableMs = now;
+    return;
+  }
+  if (now - lastAlertStableMs < 4000) {
+    return;
+  }
+
+  if (!alertHaveBaseline) {
+    alertPrevOn = alertPendingOn;
+    alertHaveBaseline = true;
+    return;
+  }
+
+  if (alertPendingOn == alertPrevOn) {
+    return;
+  }
+
+  alertPrevOn = alertPendingOn;
+  if (alertPrevOn) {
+    sendNtfy("Dryer ON", "Clothes dryer started.");
+  } else {
+    sendNtfy("Dryer OFF", "Clothes dryer stopped. Check the load.");
+  }
+}
+
+void handleApiNtfy() {
+  ntfyTopic = sanitizeNtfyTopic(server.arg("topic"));
+  prefs.putString("ntfy", ntfyTopic);
+  resetAlertBaseline();
+  Serial.print("ntfy topic ");
+  Serial.println(ntfyTopic.length() ? ntfyTopic : "(disabled)");
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleApiNtfyTest() {
+  if (ntfyTopic.length() == 0) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"no topic\"}");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(503, "application/json", "{\"ok\":false,\"err\":\"wifi\"}");
+    return;
+  }
+  const bool ok = sendNtfy("VibeMonitor test", "If you see this, iPhone alerts are working.");
+  server.send(ok ? 200 : 502, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
 void startPortal(const char* err) {

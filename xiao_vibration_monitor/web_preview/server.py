@@ -16,6 +16,7 @@ HEADER = ROOT / "xiao_vibration_monitor.ino"
 
 sensitivity = 50
 avg_window = 1.0
+ntfy_topic = ""
 t0 = time.time()
 hist: list[float] = []
 
@@ -60,6 +61,9 @@ def mock_status() -> dict:
         "detected": smoothed >= 12,
         "sensitivity": sensitivity,
         "avgWindow": round(avg_window, 1),
+        "calibrated": True,
+        "machineOn": knock > 40,
+        "ntfyTopic": ntfy_topic,
         "ssid": "Workshop-WiFi",
         "ip": "192.168.1.42",
         "mdns": "http://vibemonitor.local",
@@ -100,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
-        global sensitivity, avg_window
+        global sensitivity, avg_window, ntfy_topic
         parsed = urlparse(self.path)
         if parsed.path == "/api/sensitivity":
             qs = parse_qs(parsed.query)
@@ -113,6 +117,20 @@ class Handler(BaseHTTPRequestHandler):
             if "value" in qs:
                 avg_window = max(0.0, min(10.0, float(qs["value"][0])))
             self._send(200, b"ok", "text/plain")
+            return
+        if parsed.path == "/api/ntfy":
+            qs = parse_qs(parsed.query)
+            raw = qs.get("topic", [""])[0]
+            ntfy_topic = "".join(
+                c for c in raw if c.isalnum() or c in "_-"
+            )[:64]
+            self._send(200, b'{"ok":true}', "application/json")
+            return
+        if parsed.path == "/api/ntfy-test":
+            if not ntfy_topic:
+                self._send(400, b'{"ok":false,"err":"no topic"}', "application/json")
+                return
+            self._send(200, b'{"ok":true}', "application/json")
             return
         if parsed.path == "/wifi/save":
             self._send(200, CONNECTING.encode(), "text/html; charset=utf-8")
