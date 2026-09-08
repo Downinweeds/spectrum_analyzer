@@ -180,6 +180,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
 const hist = Array(48).fill(0);
 const canvas = document.getElementById("spark");
 const ctx = canvas.getContext("2d");
+let ntfyLoaded = false;
 
 function colorFor(v) {
   if (v >= 50) return getComputedStyle(document.documentElement).getPropertyValue("--hot").trim();
@@ -237,8 +238,9 @@ function apply(d) {
     document.getElementById("avgWin").value = d.avgWindow;
     document.getElementById("avgVal").textContent = fmtWin(d.avgWindow);
   }
-  if (typeof d.ntfyTopic === "string" && document.activeElement !== document.getElementById("ntfy")) {
+  if (!ntfyLoaded && typeof d.ntfyTopic === "string") {
     document.getElementById("ntfy").value = d.ntfyTopic;
+    ntfyLoaded = true;
   }
   hist.push(d.amplitude);
   if (hist.length > 48) hist.shift();
