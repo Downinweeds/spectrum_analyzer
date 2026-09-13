@@ -189,8 +189,10 @@ function apply(d) {
   document.getElementById("amp").style.color = colorFor(d.amplitude);
   const pill = document.getElementById("pill");
   if (d.calibrated) {
-    pill.textContent = d.machineOn ? "ON" : "OFF";
-    pill.className = "pill" + (d.machineOn ? " hot" : "");
+    const ready = d.reportedReady !== false;
+    const on = (typeof d.reportedOn === "boolean") ? d.reportedOn : !!d.machineOn;
+    pill.textContent = ready ? (on ? "Dryer ON" : "Dryer OFF") : "Dryer ...";
+    pill.className = "pill" + (ready && on ? " hot" : "");
   } else {
     pill.textContent = d.detected ? "DETECTED" : "QUIET";
     pill.className = "pill" + (d.detected ? " hot" : "");

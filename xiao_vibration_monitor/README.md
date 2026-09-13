@@ -82,7 +82,7 @@ If you wait until the countdown hits 0 to start or stop the dryer, that transiti
 
 **Sensitivity** and **Average window** do not change the numbers stored during calibration (those use raw piezo peak-to-peak). After calibration, ON/OFF detection also ignores those sliders. They only affect the live 0–100% display.
 
-After a good cal the OLED shows **DRYER ON** or **DRYER OFF** (**cal needed** until the first run). Hold D10 low again to recapture. Serial `k` starts the same routine.
+After a good cal the OLED percent is scaled from the stored OFF/ON vibration levels (idle near 0%, running near 100%). The top line shows **Dryer ON** or **Dryer OFF** using the same 4-second stable state that ntfy reports (**Dryer ...** until that first stable reading, **cal needed** until you calibrate). Hold D10 low again to recapture. Serial `k` starts the same routine.
 
 ## iPhone alerts (ntfy)
 
@@ -104,14 +104,17 @@ The HTTPS POST to `ntfy.sh` takes a moment; the OLED may pause briefly when an a
 | --- | --- |
 | Wi-Fi setup | Join AP `VibeMonitor`, then open `192.168.4.1` |
 | Connecting | Joining the saved network |
-| DRYER ON/OFF + bar + IP | Calibrated machine state and live % |
+| Dryer ON/OFF + bar + IP | Same stable state as ntfy, plus % between stored OFF and ON |
+| Dryer ... | Waiting for a 4 s stable reading after boot or a new cal |
 | cal needed | Run the D10 calibration routine |
 
 If the OLED is upside down, change `u8g2.setFlipMode(1)` to `0` in `setup()`.
 
 ## Amplitude
 
-The sketch measures **peak-to-peak** over a short window, subtracts a slow noise floor, and scales the result to 0–100. It is a **relative** knock/vibration level, not a calibrated g or dB reading. Use the phone **Sensitivity** slider if idle noise triggers DETECTED, or if real knocks look too small.
+The sketch measures **peak-to-peak** over a short window. Until you calibrate, it subtracts a slow noise floor and scales to 0–100 with the Sensitivity slider — a relative knock level, not a g or dB reading.
+
+After calibration is stored, the OLED and phone percent map that raw peak-to-peak onto the captured OFF and ON means (0% ≈ dryer off, 100% ≈ dryer on). Sensitivity no longer changes that scale. The average-window slider still smooths the number.
 
 ## Serial commands
 

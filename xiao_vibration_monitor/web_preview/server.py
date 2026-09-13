@@ -19,6 +19,14 @@ avg_window = 1.0
 ntfy_topic = ""
 t0 = time.time()
 hist: list[float] = []
+pending_on = False
+pending_since = t0
+reported_on = False
+reported_ready = False
+
+# Preview stands in for stored cal: OFF mean 40, ON mean 200.
+CAL_OFF_MEAN = 40.0
+CAL_ON_MEAN = 200.0
 
 
 def extract_html(symbol: str) -> str:
@@ -39,12 +47,14 @@ CONNECTING = extract_html("CONNECTING_HTML")
 
 
 def mock_status() -> dict:
+    global pending_on, pending_since, reported_on, reported_ready
     elapsed = time.time() - t0
-    # Quiet most of the time, with periodic knocks.
-    knock = max(0.0, math.sin(elapsed * 0.9)) ** 6 * 82
     chatter = 3 + 2 * abs(math.sin(elapsed * 7.0))
-    raw = int(40 + chatter * 3 + knock * 8)
-    amplitude = int(min(100, chatter + knock * (sensitivity / 50.0)))
+    # Alternate ~8 s ON / 8 s OFF so the 4 s ntfy-stable pill can catch up.
+    machine_on = (elapsed % 16.0) < 8.0
+    raw = int(CAL_OFF_MEAN + chatter * 3 + (CAL_ON_MEAN - CAL_OFF_MEAN) * (1.0 if machine_on else 0.0))
+    span = CAL_ON_MEAN - CAL_OFF_MEAN
+    amplitude = int(max(0, min(100, (raw - CAL_OFF_MEAN) * 100.0 / span)))
     hist.append(float(amplitude))
     if len(hist) > 400:
         del hist[: len(hist) - 400]
@@ -54,15 +64,29 @@ def mock_status() -> dict:
     else:
         window = hist[-n:]
         smoothed = int(round(sum(window) / len(window)))
+
+    now = time.time()
+    if machine_on != pending_on:
+        pending_on = machine_on
+        pending_since = now
+    elif now - pending_since >= 4.0:
+        if not reported_ready:
+            reported_on = pending_on
+            reported_ready = True
+        else:
+            reported_on = pending_on
+
     return {
         "amplitude": smoothed,
-        "peak": max(smoothed, int(knock + 18)),
+        "peak": max(smoothed, amplitude),
         "raw": raw,
         "detected": smoothed >= 12,
         "sensitivity": sensitivity,
         "avgWindow": round(avg_window, 1),
         "calibrated": True,
-        "machineOn": knock > 40,
+        "machineOn": machine_on,
+        "reportedOn": reported_on,
+        "reportedReady": reported_ready,
         "ntfyTopic": ntfy_topic,
         "ssid": "Workshop-WiFi",
         "ip": "192.168.1.42",

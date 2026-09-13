@@ -221,8 +221,10 @@ function apply(d) {
   document.getElementById("amp").style.color = colorFor(d.amplitude);
   const pill = document.getElementById("pill");
   if (d.calibrated) {
-    pill.textContent = d.machineOn ? "ON" : "OFF";
-    pill.className = "pill" + (d.machineOn ? " hot" : "");
+    const ready = d.reportedReady !== false;
+    const on = (typeof d.reportedOn === "boolean") ? d.reportedOn : !!d.machineOn;
+    pill.textContent = ready ? (on ? "Dryer ON" : "Dryer OFF") : "Dryer ...";
+    pill.className = "pill" + (ready && on ? " hot" : "");
   } else {
     pill.textContent = d.detected ? "DETECTED" : "QUIET";
     pill.className = "pill" + (d.detected ? " hot" : "");
@@ -534,7 +536,9 @@ int cmpInt(const void* a, const void* b);
 String sanitizeNtfyTopic(const String& raw);
 bool sendNtfy(const char* title, const char* msg);
 void resetAlertBaseline();
+void updateReportedState();
 void pollAlerts();
+float calibratedPercent(float raw);
 void handleApiNtfy();
 void handleApiNtfyTest();
 
@@ -865,6 +869,17 @@ float averagedAmplitude(float instant) {
   return sum / (float)n;
 }
 
+float calibratedPercent(float raw) {
+  float lo = calOffMean;
+  float hi = calOnMean;
+  if (hi < lo + 8.0f) {
+    lo = calOffP90;
+    hi = calOnP90;
+  }
+  if (hi < lo + 8.0f) hi = lo + 8.0f;
+  return constrain((raw - lo) * 100.0f / (hi - lo), 0.0f, 100.0f);
+}
+
 void sampleVibration() {
   lastRawP2P = readPiezoP2P();
 
@@ -876,11 +891,16 @@ void sampleVibration() {
   }
   if (noiseFloor < 12.0f) noiseFloor = 12.0f;
 
-  const float excess = fmaxf(0.0f, (float)lastRawP2P - noiseFloor);
-  recentMax = fmaxf(recentMax * 0.997f, fmaxf(180.0f, (float)lastRawP2P));
-  const float gain = sensitivity / 50.0f;
-  const float scale = fmaxf(160.0f, recentMax * 0.80f);
-  const float instant = constrain(excess * gain * 100.0f / scale, 0.0f, 100.0f);
+  float instant;
+  if (calValid) {
+    instant = calibratedPercent((float)lastRawP2P);
+  } else {
+    const float excess = fmaxf(0.0f, (float)lastRawP2P - noiseFloor);
+    recentMax = fmaxf(recentMax * 0.997f, fmaxf(180.0f, (float)lastRawP2P));
+    const float gain = sensitivity / 50.0f;
+    const float scale = fmaxf(160.0f, recentMax * 0.80f);
+    instant = constrain(excess * gain * 100.0f / scale, 0.0f, 100.0f);
+  }
   amplitude = constrain((int)lroundf(averagedAmplitude(instant)), 0, 100);
 
   const int detectAt = map(sensitivity, 10, 100, 22, 6);
@@ -954,12 +974,12 @@ void drawRunScreen() {
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 10, "DRYER");
-  u8g2.setFont(u8g2_font_5x8_tf);
-  if (calValid) {
-    u8g2.drawStr(machineOn ? 88 : 96, 10, machineOn ? "ON" : "OFF");
+  if (!calValid) {
+    u8g2.drawStr(0, 10, "cal needed");
+  } else if (!alertHaveBaseline) {
+    u8g2.drawStr(0, 10, "Dryer ...");
   } else {
-    u8g2.drawStr(64, 10, "cal needed");
+    u8g2.drawStr(0, 10, alertPrevOn ? "Dryer ON" : "Dryer OFF");
   }
 
   u8g2.setFont(u8g2_font_logisoso24_tn);
@@ -1091,6 +1111,10 @@ void handleApiStatus() {
   json += calValid ? "true" : "false";
   json += ",\"machineOn\":";
   json += machineOn ? "true" : "false";
+  json += ",\"reportedOn\":";
+  json += alertPrevOn ? "true" : "false";
+  json += ",\"reportedReady\":";
+  json += alertHaveBaseline ? "true" : "false";
   json += ",\"ssid\":\"" + jsonEscape(WiFi.SSID()) + "\"";
   json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   json += ",\"mdns\":\"http://";
@@ -1183,11 +1207,8 @@ bool sendNtfy(const char* title, const char* msg) {
   return code >= 200 && code < 300;
 }
 
-void pollAlerts() {
-  if (!calValid || calibrating || ntfyTopic.length() == 0) {
-    return;
-  }
-  if (mode != MODE_RUN || WiFi.status() != WL_CONNECTED) {
+void updateReportedState() {
+  if (!calValid || calibrating) {
     return;
   }
 
@@ -1212,11 +1233,29 @@ void pollAlerts() {
     return;
   }
 
-  if (alertPendingOn == alertPrevOn) {
+  if (alertPendingOn != alertPrevOn) {
+    alertPrevOn = alertPendingOn;
+  }
+}
+
+void pollAlerts() {
+  const bool hadBaseline = alertHaveBaseline;
+  const bool prevReported = alertPrevOn;
+  updateReportedState();
+
+  if (!alertHaveBaseline || !hadBaseline) {
+    return;
+  }
+  if (alertPrevOn == prevReported) {
+    return;
+  }
+  if (ntfyTopic.length() == 0) {
+    return;
+  }
+  if (mode != MODE_RUN || WiFi.status() != WL_CONNECTED) {
     return;
   }
 
-  alertPrevOn = alertPendingOn;
   if (alertPrevOn) {
     sendNtfy("Dryer ON", "Clothes dryer started.");
   } else {
@@ -1227,7 +1266,6 @@ void pollAlerts() {
 void handleApiNtfy() {
   ntfyTopic = sanitizeNtfyTopic(server.arg("topic"));
   prefs.putString("ntfy", ntfyTopic);
-  resetAlertBaseline();
   Serial.print("ntfy topic ");
   Serial.println(ntfyTopic.length() ? ntfyTopic : "(disabled)");
   server.send(200, "application/json", "{\"ok\":true}");
