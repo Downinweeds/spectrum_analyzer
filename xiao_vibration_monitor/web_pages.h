@@ -117,6 +117,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
       <span>Peak <b id="peak">0</b>%</span>
       <span>Raw <b id="raw">0</b></span>
     </div>
+    <p class="hint" id="calLine">No stored calibration</p>
   </section>
   <section class="card">
     <label>Recent level</label>
@@ -181,6 +182,12 @@ function fmtWin(v) {
   return n.toFixed(1) + " s";
 }
 
+function fmtN(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return (Math.round(n * 10) / 10).toString();
+}
+
 function apply(d) {
   document.getElementById("amp").textContent = d.amplitude;
   document.getElementById("peak").textContent = d.peak;
@@ -200,6 +207,13 @@ function apply(d) {
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";
+  const calLine = document.getElementById("calLine");
+  if (d.calibrated) {
+    calLine.textContent = "Stored ON " + fmtN(d.calOnMean) + " p90 " + fmtN(d.calOnP90) + " th " + fmtN(d.calOnThresh)
+      + "  ·  OFF " + fmtN(d.calOffMean) + " p90 " + fmtN(d.calOffP90) + " th " + fmtN(d.calOffThresh);
+  } else {
+    calLine.textContent = "No stored calibration";
+  }
   if (typeof d.sensitivity === "number" && document.activeElement !== document.getElementById("sens")) {
     document.getElementById("sens").value = d.sensitivity;
     document.getElementById("sensVal").textContent = d.sensitivity;

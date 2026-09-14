@@ -104,7 +104,7 @@ The HTTPS POST to `ntfy.sh` takes a moment; the OLED may pause briefly when an a
 | --- | --- |
 | Wi-Fi setup | Join AP `VibeMonitor`, then open `192.168.4.1` |
 | Connecting | Joining the saved network |
-| Dryer ON/OFF + bar + IP | Same stable state as ntfy, plus % between stored OFF and ON |
+| Dryer ON/OFF + bar + cal + IP | Same stable state as ntfy, % between stored OFF and ON, plus `ON mean/th OFF mean/th` |
 | Dryer ... | Waiting for a 4 s stable reading after boot or a new cal |
 | cal needed | Run the D10 calibration routine |
 
@@ -115,6 +115,8 @@ If the OLED is upside down, change `u8g2.setFlipMode(1)` to `0` in `setup()`.
 The sketch measures **peak-to-peak** over a short window. Until you calibrate, it subtracts a slow noise floor and scales to 0–100 with the Sensitivity slider — a relative knock level, not a g or dB reading.
 
 After calibration is stored, the OLED and phone percent map that raw peak-to-peak onto the captured OFF and ON means (0% ≈ dryer off, 100% ≈ dryer on). Sensitivity no longer changes that scale. The average-window slider still smooths the number.
+
+The OLED and phone dashboard also show the stored numbers (ON/OFF mean, p90, and thresholds) so you can compare them to live **Raw** while tuning.
 
 ## Serial commands
 

@@ -149,6 +149,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"html(
       <span>Peak <b id="peak">0</b>%</span>
       <span>Raw <b id="raw">0</b></span>
     </div>
+    <p class="hint" id="calLine">No stored calibration</p>
   </section>
   <section class="card">
     <label>Recent level</label>
@@ -213,6 +214,12 @@ function fmtWin(v) {
   return n.toFixed(1) + " s";
 }
 
+function fmtN(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return (Math.round(n * 10) / 10).toString();
+}
+
 function apply(d) {
   document.getElementById("amp").textContent = d.amplitude;
   document.getElementById("peak").textContent = d.peak;
@@ -232,6 +239,13 @@ function apply(d) {
   document.getElementById("net").textContent = (d.ssid || "Wi-Fi") + (d.mdns ? "  ·  " + d.mdns : "");
   document.getElementById("ip").textContent = d.ip || "";
   document.getElementById("rssi").textContent = (typeof d.rssi === "number") ? (d.rssi + " dBm") : "";
+  const calLine = document.getElementById("calLine");
+  if (d.calibrated) {
+    calLine.textContent = "Stored ON " + fmtN(d.calOnMean) + " p90 " + fmtN(d.calOnP90) + " th " + fmtN(d.calOnThresh)
+      + "  ·  OFF " + fmtN(d.calOffMean) + " p90 " + fmtN(d.calOffP90) + " th " + fmtN(d.calOffThresh);
+  } else {
+    calLine.textContent = "No stored calibration";
+  }
   if (typeof d.sensitivity === "number" && document.activeElement !== document.getElementById("sens")) {
     document.getElementById("sens").value = d.sensitivity;
     document.getElementById("sensVal").textContent = d.sensitivity;
@@ -984,15 +998,24 @@ void drawRunScreen() {
 
   u8g2.setFont(u8g2_font_logisoso24_tn);
   const int nw = u8g2.getStrWidth(num);
-  u8g2.drawStr(4, 40, num);
+  u8g2.drawStr(4, 36, num);
   u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(4 + nw + 4, 36, "%");
+  u8g2.drawStr(4 + nw + 4, 32, "%");
 
   const int barW = map(amplitude, 0, 100, 0, 124);
-  u8g2.drawFrame(0, 46, 128, 8);
-  if (barW > 0) u8g2.drawBox(2, 48, barW, 4);
+  u8g2.drawFrame(0, 40, 128, 6);
+  if (barW > 0) u8g2.drawBox(2, 41, barW, 4);
 
   u8g2.setFont(u8g2_font_5x8_tf);
+  char cal[26];
+  if (!calValid) {
+    snprintf(cal, sizeof(cal), "no stored cal");
+  } else {
+    snprintf(cal, sizeof(cal), "ON%.0f/%.0f OFF%.0f/%.0f",
+             calOnMean, calOnThresh, calOffMean, calOffThresh);
+  }
+  u8g2.drawStr(0, 54, cal);
+
   if (WiFi.status() == WL_CONNECTED) {
     u8g2.drawStr(0, 63, WiFi.localIP().toString().c_str());
   } else {
@@ -1115,6 +1138,12 @@ void handleApiStatus() {
   json += alertPrevOn ? "true" : "false";
   json += ",\"reportedReady\":";
   json += alertHaveBaseline ? "true" : "false";
+  json += ",\"calOnMean\":" + String(calOnMean, 1);
+  json += ",\"calOnP90\":" + String(calOnP90, 1);
+  json += ",\"calOffMean\":" + String(calOffMean, 1);
+  json += ",\"calOffP90\":" + String(calOffP90, 1);
+  json += ",\"calOnThresh\":" + String(calOnThresh, 1);
+  json += ",\"calOffThresh\":" + String(calOffThresh, 1);
   json += ",\"ssid\":\"" + jsonEscape(WiFi.SSID()) + "\"";
   json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   json += ",\"mdns\":\"http://";
