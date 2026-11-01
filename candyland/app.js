@@ -117,13 +117,23 @@
     return audioCtx;
   }
 
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(resolve, ms)),
+    ]);
+  }
+
   /**
    * Audiobooks keep playing in Silent mode because they use iOS "media playback".
    * Plain Web Audio often follows the Ring/Silent switch instead.
    * Playing a tiny HTMLAudioElement first switches Safari into media playback,
    * so our chimes can be heard with the switch on Silent — same as an audiobook.
+   *
+   * Do not await play() without a timeout: on some iPhones it can hang forever
+   * and freeze the DRAW button.
    */
-  async function unlockMediaSession() {
+  function unlockMediaSession() {
     if (!mediaUnlockEl) {
       // Minimal silent WAV (works offline; no extra asset files).
       mediaUnlockEl = new Audio(
@@ -134,23 +144,34 @@
       mediaUnlockEl.volume = 0.01;
     }
     try {
-      mediaUnlockEl.currentTime = 0;
-      await mediaUnlockEl.play();
-      mediaUnlockEl.pause();
-      mediaUnlockEl.currentTime = 0;
+      const playResult = mediaUnlockEl.play();
+      if (playResult && typeof playResult.then === "function") {
+        playResult
+          .then(() => {
+            try {
+              mediaUnlockEl.pause();
+              mediaUnlockEl.currentTime = 0;
+            } catch (_) {
+              /* ignore */
+            }
+          })
+          .catch(() => {
+            /* ignore — Web Audio may still work */
+          });
+      }
     } catch (_) {
-      /* ignore — Web Audio may still work with the ringer on */
+      /* ignore */
     }
   }
 
-  /** Unlock HTML media + resume Web Audio during a user gesture. */
+  /** Unlock HTML media + resume Web Audio during a user gesture (never hang). */
   async function unlockAudio() {
-    await unlockMediaSession();
+    unlockMediaSession();
     const ctx = getAudioContext();
     if (!ctx) return null;
     try {
       if (ctx.state === "suspended") {
-        await ctx.resume();
+        await withTimeout(ctx.resume(), 200);
       }
       if (!audioReady) {
         const buffer = ctx.createBuffer(1, 1, 22050);
@@ -354,7 +375,13 @@
   }
 
   async function drawCard() {
-    const ctx = await unlockAudio();
+    // Card draw must never depend on audio finishing.
+    let ctx = null;
+    try {
+      ctx = await withTimeout(unlockAudio(), 250);
+    } catch (_) {
+      ctx = getAudioContext();
+    }
 
     if (!state.deck.length) {
       playEmptyChime(ctx);
