@@ -22,14 +22,11 @@
 
   <main class="app">
     <header class="brand">
-      <h1>Candyland</h1>
-      <p>Tap Draw for your turn. Drawn cards stay out until you Reset the deck.</p>
+      <h1 class="rainbow-title" aria-label="Candyland">
+        <span>C</span><span>a</span><span>n</span><span>d</span><span>y</span><span>l</span><span>a</span><span>n</span><span>d</span>
+      </h1>
     </header>
 
-    <div class="deck-meta">
-      <span class="pill">Left in deck: <strong id="remaining">64</strong></span>
-      <span class="pill">Drawn: <strong id="drawn-count">0</strong></span>
-    </div>
     <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
 
     <section class="stage" aria-live="polite">
@@ -39,35 +36,33 @@
           <div class="ghost"></div>
           <div class="ghost"></div>
         </div>
-        <div class="placeholder" id="placeholder">Deck ready.<br />Draw a card to start.</div>
+        <div class="placeholder" id="placeholder">Tap DRAW!<br />to start</div>
         <article class="play-card" id="play-card" hidden></article>
       </div>
     </section>
 
     <div class="actions">
-      <button type="button" class="btn btn-draw" id="draw-btn">Draw Card</button>
-      <button type="button" class="btn btn-reset" id="reset-btn">Reset Deck</button>
+      <button type="button" class="btn btn-draw" id="draw-btn">DRAW!</button>
     </div>
 
-    <section class="settings">
-      <label>
-        Deck size
-        <select id="deck-select" aria-label="Choose Candyland deck size">
-          <option value="classic64">Classic (64 cards)</option>
-          <option value="vintage64">Vintage (64 cards) — includes Candy Hearts</option>
-          <option value="modern44">Modern (44 cards)</option>
-        </select>
-      </label>
-      <div class="history">
-        <h2>Recently drawn</h2>
-        <div class="history-row" id="history" aria-label="Recently drawn cards"></div>
+    <details class="grownups" id="grownups">
+      <summary>Grown-ups</summary>
+      <div class="grownups-panel">
+        <label>
+          Deck size
+          <select id="deck-select" aria-label="Choose Candyland deck size">
+            <option value="classic64">Classic (64 cards)</option>
+            <option value="vintage64">Vintage (64) — Candy Hearts</option>
+            <option value="modern44">Modern (44 cards)</option>
+          </select>
+        </label>
+        <button type="button" class="btn-reset-tiny" id="reset-btn">Reset deck</button>
+        <p class="install-tip">
+          iPhone: Share → Add to Home Screen<br />
+          Android: Menu → Add to Home screen
+        </p>
       </div>
-    </section>
-
-    <p class="install-tip">
-      On iPhone: Share → Add to Home Screen.<br />
-      On Android: Browser menu → Install app / Add to Home screen.
-    </p>
+    </details>
   </main>
 
   <div class="toast" id="toast" role="status"></div>
@@ -75,10 +70,10 @@
   <div class="modal-backdrop" id="reset-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title">
     <div class="modal">
       <h3 id="reset-title">Reset the deck?</h3>
-      <p>All drawn cards go back in. The deck will be shuffled fresh.</p>
+      <p>Put all the cards back and shuffle again.</p>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="reset-cancel">Cancel</button>
-        <button type="button" class="btn btn-draw" id="reset-confirm">Reset</button>
+        <button type="button" class="btn btn-draw btn-modal-ok" id="reset-confirm">Reset</button>
       </div>
     </div>
   </div>
