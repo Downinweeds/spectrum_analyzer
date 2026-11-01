@@ -102,16 +102,50 @@
 
   let audioCtx = null;
   let audioReady = false;
+  let mediaUnlockEl = null;
 
   function getAudioContext() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
-    if (!audioCtx) audioCtx = new Ctx();
+    if (!audioCtx) {
+      try {
+        audioCtx = new Ctx({ latencyHint: "interactive" });
+      } catch (_) {
+        audioCtx = new Ctx();
+      }
+    }
     return audioCtx;
   }
 
-  /** iPhone Safari needs resume() + a real buffer kick during a user gesture. */
+  /**
+   * Audiobooks keep playing in Silent mode because they use iOS "media playback".
+   * Plain Web Audio often follows the Ring/Silent switch instead.
+   * Playing a tiny HTMLAudioElement first switches Safari into media playback,
+   * so our chimes can be heard with the switch on Silent — same as an audiobook.
+   */
+  async function unlockMediaSession() {
+    if (!mediaUnlockEl) {
+      // Minimal silent WAV (works offline; no extra asset files).
+      mediaUnlockEl = new Audio(
+        "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
+      );
+      mediaUnlockEl.setAttribute("playsinline", "true");
+      mediaUnlockEl.preload = "auto";
+      mediaUnlockEl.volume = 0.01;
+    }
+    try {
+      mediaUnlockEl.currentTime = 0;
+      await mediaUnlockEl.play();
+      mediaUnlockEl.pause();
+      mediaUnlockEl.currentTime = 0;
+    } catch (_) {
+      /* ignore — Web Audio may still work with the ringer on */
+    }
+  }
+
+  /** Unlock HTML media + resume Web Audio during a user gesture. */
   async function unlockAudio() {
+    await unlockMediaSession();
     const ctx = getAudioContext();
     if (!ctx) return null;
     try {
