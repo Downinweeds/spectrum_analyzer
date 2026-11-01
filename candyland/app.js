@@ -2,53 +2,52 @@
   "use strict";
 
   const COLORS = {
-    red: { name: "Red", hex: "#e84855" },
+    red: { name: "Red", hex: "#ff3b4e" },
     purple: { name: "Purple", hex: "#7b61ff" },
-    yellow: { name: "Yellow", hex: "#ffd166" },
-    blue: { name: "Blue", hex: "#4cc9f0" },
-    orange: { name: "Orange", hex: "#ff9f1c" },
-    green: { name: "Green", hex: "#2ec4b6" },
+    yellow: { name: "Yellow", hex: "#ffd000" },
+    blue: { name: "Blue", hex: "#2eb7ff" },
+    orange: { name: "Orange", hex: "#ff8a1f" },
+    green: { name: "Green", hex: "#2ad17a" },
   };
 
   const TREATS = {
     peppermint: {
       name: "Peppermint Forest",
-      hint: "Move to the Peppermint Forest space.",
+      hint: "Go to Peppermint Forest!",
       art: "peppermint",
     },
     peanut: {
       name: "Peanut Brittle House",
-      hint: "Move to the Peanut Brittle House space.",
+      hint: "Go to Peanut Brittle House!",
       art: "peanut",
     },
     lollipop: {
       name: "Lollipop Woods",
-      hint: "Move to the Lollipop Woods space.",
+      hint: "Go to Lollipop Woods!",
       art: "lollipop",
     },
     icecream: {
       name: "Ice Cream Sea",
-      hint: "Move to the Ice Cream Sea space.",
+      hint: "Go to Ice Cream Sea!",
       art: "icecream",
     },
     gumdrop: {
       name: "Gumdrop Mountains",
-      hint: "Move to the Gumdrop Mountains space.",
+      hint: "Go to Gumdrop Mountains!",
       art: "gumdrop",
     },
     gingerbread: {
       name: "Gingerbread Tree",
-      hint: "Move to the Gingerbread Tree space.",
+      hint: "Go to Gingerbread Tree!",
       art: "gingerbread",
     },
     candyhearts: {
       name: "Candy Hearts",
-      hint: "Move to the Candy Hearts space.",
+      hint: "Go to Candy Hearts!",
       art: "candyhearts",
     },
   };
 
-  /** Classic / modern / vintage anniversary-style decks. */
   const DECK_SPECS = {
     classic64: {
       label: "Classic (64)",
@@ -58,7 +57,6 @@
     },
     vintage64: {
       label: "Vintage (64)",
-      // Anniversary-style boards include Candy Hearts as a 7th picture space.
       singles: { red: 7, purple: 8, yellow: 8, blue: 8, orange: 7, green: 7 },
       doubles: { red: 2, purple: 2, yellow: 2, blue: 2, orange: 2, green: 2 },
       treats: [
@@ -79,11 +77,9 @@
     },
   };
 
-  const STORAGE_KEY = "candyland-drawer-v1";
+  const STORAGE_KEY = "candyland-drawer-v2";
 
   const els = {
-    remaining: document.getElementById("remaining"),
-    drawnCount: document.getElementById("drawn-count"),
     progress: document.getElementById("progress-bar"),
     deckStack: document.getElementById("deck-stack"),
     placeholder: document.getElementById("placeholder"),
@@ -91,7 +87,6 @@
     drawBtn: document.getElementById("draw-btn"),
     resetBtn: document.getElementById("reset-btn"),
     deckSelect: document.getElementById("deck-select"),
-    history: document.getElementById("history"),
     toast: document.getElementById("toast"),
     modal: document.getElementById("reset-modal"),
     resetCancel: document.getElementById("reset-cancel"),
@@ -105,6 +100,54 @@
     current: null,
   };
 
+  let audioCtx = null;
+
+  function ensureAudio() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  function tone(freq, start, dur, type, gainValue) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime + start);
+    osc.stop(ctx.currentTime + start + dur + 0.02);
+  }
+
+  /** Soft bell chime for a normal draw. */
+  function playDrawChime() {
+    tone(880, 0, 0.35, "sine", 0.18);
+    tone(1320, 0.05, 0.4, "sine", 0.12);
+  }
+
+  /** Two chimes when the deck runs out. */
+  function playEmptyChime() {
+    tone(784, 0, 0.28, "sine", 0.18);
+    tone(1176, 0.06, 0.32, "sine", 0.12);
+    tone(784, 0.38, 0.28, "sine", 0.18);
+    tone(1176, 0.44, 0.35, "sine", 0.12);
+  }
+
+  /** Playful sparkle for special/picture cards. */
+  function playTreatSound() {
+    tone(523.25, 0, 0.18, "triangle", 0.14);
+    tone(659.25, 0.1, 0.18, "triangle", 0.14);
+    tone(783.99, 0.2, 0.2, "triangle", 0.14);
+    tone(1046.5, 0.32, 0.45, "sine", 0.16);
+  }
+
   function buildDeck(type) {
     const spec = DECK_SPECS[type];
     const cards = [];
@@ -117,7 +160,7 @@
           kind: "single",
           color,
           label: COLORS[color].name,
-          hint: `Move to the next ${COLORS[color].name.toLowerCase()} space.`,
+          hint: `Go to the next ${COLORS[color].name}!`,
         });
       }
     }
@@ -129,7 +172,7 @@
           kind: "double",
           color,
           label: `Double ${COLORS[color].name}`,
-          hint: `Move to the second ${COLORS[color].name.toLowerCase()} space.`,
+          hint: `Skip to the second ${COLORS[color].name}!`,
         });
       }
     }
@@ -170,7 +213,7 @@
         })
       );
     } catch (_) {
-      /* ignore quota / private mode */
+      /* ignore */
     }
   }
 
@@ -201,8 +244,16 @@
     showToast._t = setTimeout(() => els.toast.classList.remove("show"), 2200);
   }
 
-  function vibrate() {
-    if (navigator.vibrate) navigator.vibrate(12);
+  function vibrate(pattern = 12) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
   }
 
   function renderCard(card) {
@@ -233,51 +284,22 @@
     `;
   }
 
-  function escapeHtml(str) {
-    return String(str)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
-  }
-
-  function renderHistory() {
-    const recent = [...state.discard, ...(state.current ? [state.current] : [])]
-      .slice(-12)
-      .reverse();
-    if (!recent.length) {
-      els.history.innerHTML = `<span class="chip">No cards drawn yet</span>`;
-      return;
-    }
-    els.history.innerHTML = recent
-      .map((card) => {
-        if (card.kind === "treat") {
-          return `<span class="chip"><span class="swatch treat" style="background:#ff5c8a"></span>${escapeHtml(card.label)}</span>`;
-        }
-        const hex = COLORS[card.color].hex;
-        const cls = card.kind === "double" ? "swatch double" : "swatch";
-        return `<span class="chip"><span class="${cls}" style="background:${hex};color:${hex}"></span>${escapeHtml(card.label)}</span>`;
-      })
-      .join("");
-  }
-
   function updateChrome() {
     const left = state.deck.length;
-    const drawn = state.discard.length + (state.current ? 1 : 0);
     const total = Math.max(totalSize(), 1);
-    els.remaining.textContent = String(left);
-    els.drawnCount.textContent = String(drawn);
     els.progress.style.transform = `scaleX(${left / total})`;
     els.deckStack.classList.toggle("empty", left === 0);
     els.drawBtn.disabled = left === 0;
-    els.drawBtn.textContent = left === 0 ? "Deck Empty" : "Draw Card";
+    els.drawBtn.textContent = left === 0 ? "EMPTY!" : "DRAW!";
     els.deckSelect.value = state.deckType;
-    renderHistory();
   }
 
   function drawCard() {
+    ensureAudio();
+
     if (!state.deck.length) {
-      showToast("Deck is empty — tap Reset Deck.");
+      playEmptyChime();
+      showToast("No cards left — ask a grown-up to Reset.");
       return;
     }
 
@@ -287,9 +309,8 @@
 
     const card = state.deck.pop();
     state.current = card;
-    vibrate();
+    vibrate(card.kind === "treat" ? [12, 40, 18] : 12);
     renderCard(card);
-    // restart animation
     void els.playCard.offsetWidth;
     els.playCard.classList.remove("visible");
     void els.playCard.offsetWidth;
@@ -298,7 +319,12 @@
     save();
 
     if (!state.deck.length) {
-      showToast("That was the last card. Reset when you’re ready.");
+      playEmptyChime();
+      showToast("Last card! Ask a grown-up to Reset.");
+    } else if (card.kind === "treat") {
+      playTreatSound();
+    } else {
+      playDrawChime();
     }
   }
 
@@ -310,10 +336,10 @@
     els.playCard.className = "play-card";
     els.playCard.innerHTML = "";
     els.placeholder.classList.remove("hidden");
-    els.placeholder.innerHTML = "Deck shuffled.<br />Draw a card to start.";
+    els.placeholder.innerHTML = "Tap DRAW!<br />to start";
     updateChrome();
     save();
-    if (announce) showToast("Fresh deck — good luck!");
+    if (announce) showToast("Fresh deck — let's play!");
   }
 
   function changeDeckType(type) {
@@ -323,9 +349,7 @@
     }
     const midGame = state.discard.length > 0 || state.current;
     if (midGame) {
-      const ok = window.confirm(
-        "Switching deck size reshuffles and puts every card back. Continue?"
-      );
+      const ok = window.confirm("Switching decks puts all cards back. Continue?");
       if (!ok) {
         els.deckSelect.value = state.deckType;
         return;
@@ -347,7 +371,7 @@
     const restored = load();
     if (!restored) {
       resetDeck(false);
-      els.placeholder.innerHTML = "Deck ready.<br />Draw a card to start.";
+      els.placeholder.innerHTML = "Tap DRAW!<br />to start";
     } else {
       updateChrome();
       if (state.current) {
@@ -357,8 +381,8 @@
         els.placeholder.classList.remove("hidden");
         els.placeholder.innerHTML =
           state.deck.length === 0
-            ? "Deck empty.<br />Tap Reset Deck to shuffle again."
-            : "Welcome back.<br />Draw the next card.";
+            ? "Deck empty.<br />Ask a grown-up to Reset."
+            : "Tap DRAW!<br />for the next card";
       }
     }
 
