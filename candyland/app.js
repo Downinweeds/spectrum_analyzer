@@ -101,51 +101,76 @@
   };
 
   let audioCtx = null;
+  let audioReady = false;
 
-  function ensureAudio() {
+  function getAudioContext() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
     if (!audioCtx) audioCtx = new Ctx();
-    if (audioCtx.state === "suspended") audioCtx.resume();
     return audioCtx;
   }
 
-  function tone(freq, start, dur, type, gainValue) {
-    const ctx = ensureAudio();
+  /** iPhone Safari needs resume() + a real buffer kick during a user gesture. */
+  async function unlockAudio() {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+    try {
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+      if (!audioReady) {
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+        audioReady = true;
+      }
+    } catch (_) {
+      /* ignore unlock failures; tone() may still work later */
+    }
+    return ctx;
+  }
+
+  function tone(ctx, freq, start, dur, type, gainValue) {
     if (!ctx) return;
+    const t0 = ctx.currentTime + start;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(gainValue, t0 + 0.02);
+    gain.gain.linearRampToValueAtTime(gainValue * 0.55, t0 + dur * 0.45);
+    gain.gain.linearRampToValueAtTime(0, t0 + dur);
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.start(ctx.currentTime + start);
-    osc.stop(ctx.currentTime + start + dur + 0.02);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
   }
 
-  /** Soft bell chime for a normal draw. */
-  function playDrawChime() {
-    tone(880, 0, 0.35, "sine", 0.18);
-    tone(1320, 0.05, 0.4, "sine", 0.12);
+  /** Clear bell chime for a normal draw. */
+  function playDrawChime(ctx) {
+    tone(ctx, 1046.5, 0, 0.45, "sine", 0.45);
+    tone(ctx, 1568, 0.06, 0.5, "sine", 0.28);
+    tone(ctx, 2093, 0.1, 0.35, "sine", 0.12);
   }
 
   /** Two chimes when the deck runs out. */
-  function playEmptyChime() {
-    tone(784, 0, 0.28, "sine", 0.18);
-    tone(1176, 0.06, 0.32, "sine", 0.12);
-    tone(784, 0.38, 0.28, "sine", 0.18);
-    tone(1176, 0.44, 0.35, "sine", 0.12);
+  function playEmptyChime(ctx) {
+    tone(ctx, 880, 0, 0.35, "sine", 0.42);
+    tone(ctx, 1318.5, 0.07, 0.4, "sine", 0.26);
+    tone(ctx, 880, 0.42, 0.35, "sine", 0.42);
+    tone(ctx, 1318.5, 0.5, 0.45, "sine", 0.26);
   }
 
   /** Playful sparkle for special/picture cards. */
-  function playTreatSound() {
-    tone(523.25, 0, 0.18, "triangle", 0.14);
-    tone(659.25, 0.1, 0.18, "triangle", 0.14);
-    tone(783.99, 0.2, 0.2, "triangle", 0.14);
-    tone(1046.5, 0.32, 0.45, "sine", 0.16);
+  function playTreatSound(ctx) {
+    tone(ctx, 523.25, 0, 0.22, "triangle", 0.35);
+    tone(ctx, 659.25, 0.1, 0.22, "triangle", 0.35);
+    tone(ctx, 783.99, 0.2, 0.24, "triangle", 0.35);
+    tone(ctx, 1046.5, 0.32, 0.5, "sine", 0.4);
+    tone(ctx, 1568, 0.4, 0.45, "sine", 0.22);
   }
 
   function buildDeck(type) {
@@ -294,11 +319,11 @@
     els.deckSelect.value = state.deckType;
   }
 
-  function drawCard() {
-    ensureAudio();
+  async function drawCard() {
+    const ctx = await unlockAudio();
 
     if (!state.deck.length) {
-      playEmptyChime();
+      playEmptyChime(ctx);
       showToast("No cards left — ask a grown-up to Reset.");
       return;
     }
@@ -319,12 +344,12 @@
     save();
 
     if (!state.deck.length) {
-      playEmptyChime();
+      playEmptyChime(ctx);
       showToast("Last card! Ask a grown-up to Reset.");
     } else if (card.kind === "treat") {
-      playTreatSound();
+      playTreatSound(ctx);
     } else {
-      playDrawChime();
+      playDrawChime(ctx);
     }
   }
 
@@ -386,7 +411,16 @@
       }
     }
 
-    els.drawBtn.addEventListener("click", drawCard);
+    // Warm up audio on first touch (helps iPhone home-screen / Safari).
+    const armAudio = () => {
+      unlockAudio();
+    };
+    document.addEventListener("pointerdown", armAudio, { once: true, passive: true });
+    document.addEventListener("touchstart", armAudio, { once: true, passive: true });
+
+    els.drawBtn.addEventListener("click", () => {
+      drawCard();
+    });
     els.resetBtn.addEventListener("click", openResetModal);
     els.resetCancel.addEventListener("click", closeResetModal);
     els.resetConfirm.addEventListener("click", () => {

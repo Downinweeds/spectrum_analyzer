@@ -1,4 +1,4 @@
-const CACHE = "candyland-drawer-v4";
+const CACHE = "candyland-drawer-v5";
 const ASSETS = [
   "./",
   "./index.html",
