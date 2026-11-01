@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#FF5C8A" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Candyland" />
+  <meta name="description" content="Draw Candyland cards on your phone. Cards leave the deck until you Reset." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="app.css" />
+  <title>Candyland Card Drawer</title>
+</head>
+<body>
+  <div class="bg-swirl" aria-hidden="true"></div>
+
+  <main class="app">
+    <header class="brand">
+      <h1>Candyland</h1>
+      <p>Tap Draw for your turn. Drawn cards stay out until you Reset the deck.</p>
+    </header>
+
+    <div class="deck-meta">
+      <span class="pill">Left in deck: <strong id="remaining">64</strong></span>
+      <span class="pill">Drawn: <strong id="drawn-count">0</strong></span>
+    </div>
+    <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+
+    <section class="stage" aria-live="polite">
+      <div class="card-stage">
+        <div class="deck-stack" id="deck-stack" aria-hidden="true">
+          <div class="ghost"></div>
+          <div class="ghost"></div>
+          <div class="ghost"></div>
+        </div>
+        <div class="placeholder" id="placeholder">Deck ready.<br />Draw a card to start.</div>
+        <article class="play-card" id="play-card" hidden></article>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button type="button" class="btn btn-draw" id="draw-btn">Draw Card</button>
+      <button type="button" class="btn btn-reset" id="reset-btn">Reset Deck</button>
+    </div>
+
+    <section class="settings">
+      <label>
+        Deck size
+        <select id="deck-select" aria-label="Choose Candyland deck size">
+          <option value="classic64">Classic (64 cards)</option>
+          <option value="modern44">Modern (44 cards)</option>
+        </select>
+      </label>
+      <div class="history">
+        <h2>Recently drawn</h2>
+        <div class="history-row" id="history" aria-label="Recently drawn cards"></div>
+      </div>
+    </section>
+
+    <p class="install-tip">
+      On iPhone: Share → Add to Home Screen.<br />
+      On Android: Browser menu → Install app / Add to Home screen.
+    </p>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="modal-backdrop" id="reset-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+    <div class="modal">
+      <h3 id="reset-title">Reset the deck?</h3>
+      <p>All drawn cards go back in. The deck will be shuffled fresh.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="reset-cancel">Cancel</button>
+        <button type="button" class="btn btn-draw" id="reset-confirm">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
