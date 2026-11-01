@@ -391,6 +391,35 @@ body {
   border-radius: 6px;
 }
 
+.treat-candyhearts > span {
+  width: 52px;
+  height: 48px;
+  background: #ff5c8a;
+  transform: rotate(-45deg);
+  border-radius: 4px 4px 2px 2px;
+  box-shadow: 10px -8px 0 -4px #ff8fb0;
+}
+
+.treat-candyhearts > span::before,
+.treat-candyhearts > span::after {
+  content: "";
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  background: #ff5c8a;
+  border-radius: 50%;
+}
+
+.treat-candyhearts > span::before {
+  top: -26px;
+  left: 0;
+}
+
+.treat-candyhearts > span::after {
+  left: 26px;
+  top: 0;
+}
+
 .placeholder {
   text-align: center;
   color: var(--ink-soft);
