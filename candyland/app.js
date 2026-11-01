@@ -100,132 +100,128 @@
     current: null,
   };
 
-  let audioCtx = null;
-  let audioReady = false;
-  let mediaUnlockEl = null;
-
-  function getAudioContext() {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return null;
-    if (!audioCtx) {
-      try {
-        audioCtx = new Ctx({ latencyHint: "interactive" });
-      } catch (_) {
-        audioCtx = new Ctx();
-      }
-    }
-    return audioCtx;
-  }
-
-  function withTimeout(promise, ms) {
-    return Promise.race([
-      promise,
-      new Promise((resolve) => setTimeout(resolve, ms)),
-    ]);
-  }
-
   /**
-   * Audiobooks keep playing in Silent mode because they use iOS "media playback".
-   * Plain Web Audio often follows the Ring/Silent switch instead.
-   * Playing a tiny HTMLAudioElement first switches Safari into media playback,
-   * so our chimes can be heard with the switch on Silent — same as an audiobook.
-   *
-   * Do not await play() without a timeout: on some iPhones it can hang forever
-   * and freeze the DRAW button.
+   * Play chimes with HTMLAudioElement + WAV blobs (media playback).
+   * iPhone Silent mode mutes many Web Audio beeps, but media audio
+   * (same path as audiobooks) still plays. Never await play().
    */
-  function unlockMediaSession() {
-    if (!mediaUnlockEl) {
-      // Minimal silent WAV (works offline; no extra asset files).
-      mediaUnlockEl = new Audio(
-        "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
-      );
-      mediaUnlockEl.setAttribute("playsinline", "true");
-      mediaUnlockEl.preload = "auto";
-      mediaUnlockEl.volume = 0.01;
+  const SAMPLE_RATE = 22050;
+  let soundUrls = null;
+
+  function writeAscii(view, offset, text) {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
     }
+  }
+
+  function samplesToWavUrl(samples) {
+    const bytes = samples.length * 2;
+    const buffer = new ArrayBuffer(44 + bytes);
+    const view = new DataView(buffer);
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + bytes, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, SAMPLE_RATE, true);
+    view.setUint32(28, SAMPLE_RATE * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, bytes, true);
+    let o = 44;
+    for (let i = 0; i < samples.length; i += 1) {
+      const clipped = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(o, clipped < 0 ? clipped * 0x8000 : clipped * 0x7fff, true);
+      o += 2;
+    }
+    return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+  }
+
+  function mixTone(samples, freq, startSec, durSec, amp, waveType) {
+    const start = Math.floor(startSec * SAMPLE_RATE);
+    const n = Math.floor(durSec * SAMPLE_RATE);
+    const attack = 0.02;
+    const release = Math.min(0.22, durSec * 0.45);
+    for (let i = 0; i < n; i += 1) {
+      const t = i / SAMPLE_RATE;
+      let gain = amp;
+      if (t < attack) gain *= t / attack;
+      else if (t > durSec - release) gain *= Math.max(0, (durSec - t) / release);
+      const phase = 2 * Math.PI * freq * t;
+      let wave = Math.sin(phase);
+      if (waveType === "triangle") {
+        const x = (freq * t) % 1;
+        wave = 4 * Math.abs(x - 0.5) - 1;
+      }
+      const idx = start + i;
+      if (idx < samples.length) samples[idx] += wave * gain;
+    }
+  }
+
+  function renderClip(durationSec, buildFn) {
+    const samples = new Float32Array(Math.ceil(durationSec * SAMPLE_RATE));
+    buildFn(samples);
+    let peak = 0.001;
+    for (let i = 0; i < samples.length; i += 1) {
+      peak = Math.max(peak, Math.abs(samples[i]));
+    }
+    const norm = Math.min(1, 0.92 / peak);
+    for (let i = 0; i < samples.length; i += 1) samples[i] *= norm;
+    return samplesToWavUrl(samples);
+  }
+
+  function ensureSounds() {
+    if (soundUrls) return soundUrls;
+    soundUrls = {
+      draw: renderClip(0.55, (s) => {
+        mixTone(s, 1046.5, 0, 0.45, 0.55);
+        mixTone(s, 1568, 0.06, 0.5, 0.35);
+        mixTone(s, 2093, 0.1, 0.35, 0.2);
+      }),
+      empty: renderClip(0.95, (s) => {
+        mixTone(s, 880, 0, 0.35, 0.5);
+        mixTone(s, 1318.5, 0.07, 0.4, 0.32);
+        mixTone(s, 880, 0.42, 0.35, 0.5);
+        mixTone(s, 1318.5, 0.5, 0.45, 0.32);
+      }),
+      treat: renderClip(0.85, (s) => {
+        mixTone(s, 523.25, 0, 0.22, 0.42, "triangle");
+        mixTone(s, 659.25, 0.1, 0.22, 0.42, "triangle");
+        mixTone(s, 783.99, 0.2, 0.24, 0.42, "triangle");
+        mixTone(s, 1046.5, 0.32, 0.5, 0.48);
+        mixTone(s, 1568, 0.4, 0.45, 0.28);
+      }),
+    };
+    return soundUrls;
+  }
+
+  function playSound(kind) {
     try {
-      const playResult = mediaUnlockEl.play();
-      if (playResult && typeof playResult.then === "function") {
-        playResult
-          .then(() => {
-            try {
-              mediaUnlockEl.pause();
-              mediaUnlockEl.currentTime = 0;
-            } catch (_) {
-              /* ignore */
-            }
-          })
-          .catch(() => {
-            /* ignore — Web Audio may still work */
-          });
-      }
+      const url = ensureSounds()[kind];
+      if (!url) return;
+      const audio = new Audio(url);
+      audio.setAttribute("playsinline", "true");
+      audio.volume = 1;
+      const result = audio.play();
+      if (result && typeof result.catch === "function") result.catch(() => {});
     } catch (_) {
-      /* ignore */
+      /* never block drawing on sound errors */
     }
   }
 
-  /** Unlock HTML media + resume Web Audio during a user gesture (never hang). */
-  async function unlockAudio() {
-    unlockMediaSession();
-    const ctx = getAudioContext();
-    if (!ctx) return null;
-    try {
-      if (ctx.state === "suspended") {
-        await withTimeout(ctx.resume(), 200);
-      }
-      if (!audioReady) {
-        const buffer = ctx.createBuffer(1, 1, 22050);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        source.start(0);
-        audioReady = true;
-      }
-    } catch (_) {
-      /* ignore unlock failures; tone() may still work later */
-    }
-    return ctx;
+  function playDrawChime() {
+    playSound("draw");
   }
 
-  function tone(ctx, freq, start, dur, type, gainValue) {
-    if (!ctx) return;
-    const t0 = ctx.currentTime + start;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t0);
-    gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(gainValue, t0 + 0.02);
-    gain.gain.linearRampToValueAtTime(gainValue * 0.55, t0 + dur * 0.45);
-    gain.gain.linearRampToValueAtTime(0, t0 + dur);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.05);
+  function playEmptyChime() {
+    playSound("empty");
   }
 
-  /** Clear bell chime for a normal draw. */
-  function playDrawChime(ctx) {
-    tone(ctx, 1046.5, 0, 0.45, "sine", 0.45);
-    tone(ctx, 1568, 0.06, 0.5, "sine", 0.28);
-    tone(ctx, 2093, 0.1, 0.35, "sine", 0.12);
-  }
-
-  /** Two chimes when the deck runs out. */
-  function playEmptyChime(ctx) {
-    tone(ctx, 880, 0, 0.35, "sine", 0.42);
-    tone(ctx, 1318.5, 0.07, 0.4, "sine", 0.26);
-    tone(ctx, 880, 0.42, 0.35, "sine", 0.42);
-    tone(ctx, 1318.5, 0.5, 0.45, "sine", 0.26);
-  }
-
-  /** Playful sparkle for special/picture cards. */
-  function playTreatSound(ctx) {
-    tone(ctx, 523.25, 0, 0.22, "triangle", 0.35);
-    tone(ctx, 659.25, 0.1, 0.22, "triangle", 0.35);
-    tone(ctx, 783.99, 0.2, 0.24, "triangle", 0.35);
-    tone(ctx, 1046.5, 0.32, 0.5, "sine", 0.4);
-    tone(ctx, 1568, 0.4, 0.45, "sine", 0.22);
+  function playTreatSound() {
+    playSound("treat");
   }
 
   function buildDeck(type) {
@@ -374,17 +370,12 @@
     els.deckSelect.value = state.deckType;
   }
 
-  async function drawCard() {
-    // Card draw must never depend on audio finishing.
-    let ctx = null;
-    try {
-      ctx = await withTimeout(unlockAudio(), 250);
-    } catch (_) {
-      ctx = getAudioContext();
-    }
+  function drawCard() {
+    // Build WAV urls early (sync, fast). Playback is fire-and-forget HTMLAudio.
+    ensureSounds();
 
     if (!state.deck.length) {
-      playEmptyChime(ctx);
+      playEmptyChime();
       showToast("No cards left — ask a grown-up to Reset.");
       return;
     }
@@ -405,12 +396,12 @@
     save();
 
     if (!state.deck.length) {
-      playEmptyChime(ctx);
+      playEmptyChime();
       showToast("Last card! Ask a grown-up to Reset.");
     } else if (card.kind === "treat") {
-      playTreatSound(ctx);
+      playTreatSound();
     } else {
-      playDrawChime(ctx);
+      playDrawChime();
     }
   }
 
@@ -472,16 +463,14 @@
       }
     }
 
-    // Warm up audio on first touch (helps iPhone home-screen / Safari).
+    // Prebuild chime WAVs on first touch so DRAW stays snappy.
     const armAudio = () => {
-      unlockAudio();
+      ensureSounds();
     };
     document.addEventListener("pointerdown", armAudio, { once: true, passive: true });
     document.addEventListener("touchstart", armAudio, { once: true, passive: true });
 
-    els.drawBtn.addEventListener("click", () => {
-      drawCard();
-    });
+    els.drawBtn.addEventListener("click", drawCard);
     els.resetBtn.addEventListener("click", openResetModal);
     els.resetCancel.addEventListener("click", closeResetModal);
     els.resetConfirm.addEventListener("click", () => {
