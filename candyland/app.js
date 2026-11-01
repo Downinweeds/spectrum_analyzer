@@ -41,15 +41,35 @@
       hint: "Move to the Gingerbread Tree space.",
       art: "gingerbread",
     },
+    candyhearts: {
+      name: "Candy Hearts",
+      hint: "Move to the Candy Hearts space.",
+      art: "candyhearts",
+    },
   };
 
-  /** Classic ~64-card style + modern 44-card style (common editions). */
+  /** Classic / modern / vintage anniversary-style decks. */
   const DECK_SPECS = {
     classic64: {
       label: "Classic (64)",
       singles: { red: 8, purple: 8, yellow: 8, blue: 8, orange: 7, green: 7 },
       doubles: { red: 2, purple: 2, yellow: 2, blue: 2, orange: 2, green: 2 },
       treats: ["peppermint", "peanut", "lollipop", "icecream", "gumdrop", "gingerbread"],
+    },
+    vintage64: {
+      label: "Vintage (64)",
+      // Anniversary-style boards include Candy Hearts as a 7th picture space.
+      singles: { red: 7, purple: 8, yellow: 8, blue: 8, orange: 7, green: 7 },
+      doubles: { red: 2, purple: 2, yellow: 2, blue: 2, orange: 2, green: 2 },
+      treats: [
+        "candyhearts",
+        "peppermint",
+        "peanut",
+        "lollipop",
+        "icecream",
+        "gumdrop",
+        "gingerbread",
+      ],
     },
     modern44: {
       label: "Modern (44)",
