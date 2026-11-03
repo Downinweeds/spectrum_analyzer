@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  /** Bump this on every Candyland release so phones show the loaded build. */
+  const APP_REV = 12;
+
   const COLORS = {
     red: { name: "Red", hex: "#ff3b4e" },
     purple: { name: "Purple", hex: "#7b61ff" },
@@ -107,8 +110,18 @@
    */
   const SAMPLE_RATE = 22050;
   let soundUrls = null;
-  /** Reused players — creating a new Audio() every draw exhausts iOS 15. */
-  const soundPlayers = { draw: null, empty: null, treat: null };
+  /**
+   * Two players per sound (ping-pong). Reusing one Audio and pause/seek/play
+   * is flaky on iOS 15; alternating avoids that without allocating every draw.
+   * Always call play() directly from the tap handler (no setTimeout) or iOS
+   * drops the user-gesture and sound fails ~randomly.
+   */
+  const soundPlayers = {
+    draw: [null, null],
+    empty: [null, null],
+    treat: [null, null],
+  };
+  const soundSlot = { draw: 0, empty: 0, treat: 0 };
 
   function writeAscii(view, offset, text) {
     for (let i = 0; i < text.length; i += 1) {
@@ -210,52 +223,51 @@
     return audio;
   }
 
-  function getPlayer(kind) {
-    if (!soundPlayers[kind]) {
-      soundPlayers[kind] = createPlayer(kind);
+  function nextPlayer(kind) {
+    const slot = soundSlot[kind];
+    soundSlot[kind] = slot ^ 1;
+    if (!soundPlayers[kind][slot]) {
+      soundPlayers[kind][slot] = createPlayer(kind);
     }
-    return soundPlayers[kind];
+    return { audio: soundPlayers[kind][slot], slot };
   }
 
   function armSoundPlayers() {
     ensureSounds();
     ["draw", "empty", "treat"].forEach((kind) => {
-      getPlayer(kind);
+      soundPlayers[kind][0] = soundPlayers[kind][0] || createPlayer(kind);
+      soundPlayers[kind][1] = soundPlayers[kind][1] || createPlayer(kind);
     });
-  }
-
-  function restartPlayer(audio) {
-    try {
-      audio.pause();
-    } catch (_) {
-      /* ignore */
-    }
-    try {
-      audio.currentTime = 0;
-    } catch (_) {
-      try {
-        audio.load();
-      } catch (_) {
-        /* ignore */
-      }
-    }
   }
 
   function playSound(kind) {
     try {
-      let audio = getPlayer(kind);
+      const picked = nextPlayer(kind);
+      const audio = picked.audio;
       if (!audio) return;
-      restartPlayer(audio);
+      try {
+        if (!audio.paused) audio.pause();
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        audio.currentTime = 0;
+      } catch (_) {
+        /* ignore seek errors on cold start */
+      }
       const result = audio.play();
-      if (result && typeof result.then === "function") {
+      if (result && typeof result.catch === "function") {
         result.catch(() => {
-          // iOS can invalidate a player after many plays — rebuild once.
-          soundPlayers[kind] = null;
-          audio = getPlayer(kind);
-          if (!audio) return;
-          restartPlayer(audio);
-          const retry = audio.play();
-          if (retry && typeof retry.catch === "function") retry.catch(() => {});
+          soundPlayers[kind][picked.slot] = createPlayer(kind);
+          const retry = soundPlayers[kind][picked.slot];
+          if (!retry) return;
+          try {
+            retry.currentTime = 0;
+          } catch (_) {
+            /* ignore */
+          }
+          const again = retry.play();
+          if (again && typeof again.catch === "function") again.catch(() => {});
         });
       }
     } catch (_) {
@@ -263,21 +275,16 @@
     }
   }
 
-  /** Run after the card paints so a slow audio path can't freeze DRAW. */
-  function playSoundSoon(kind) {
-    setTimeout(() => playSound(kind), 0);
-  }
-
   function playDrawChime() {
-    playSoundSoon("draw");
+    playSound("draw");
   }
 
   function playEmptyChime() {
-    playSoundSoon("empty");
+    playSound("empty");
   }
 
   function playTreatSound() {
-    playSoundSoon("treat");
+    playSound("treat");
   }
 
   function buildDeck(type) {
@@ -498,6 +505,9 @@
   }
 
   function init() {
+    const revEl = document.getElementById("app-rev");
+    if (revEl) revEl.textContent = `Rev. ${APP_REV}`;
+
     const restored = load();
     if (!restored) {
       resetDeck(false);

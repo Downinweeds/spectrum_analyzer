@@ -551,6 +551,21 @@ body {
   opacity: 0.85;
 }
 
+.app-rev {
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  opacity: 0.4;
+  z-index: 6;
+  pointer-events: none;
+  user-select: none;
+}
+
 .toast {
   position: fixed;
   left: 50%;
