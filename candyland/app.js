@@ -2,7 +2,7 @@
   "use strict";
 
   /** Bump this on every Candyland release so phones show the loaded build. */
-  const APP_REV = 13;
+  const APP_REV = 14;
 
   const COLORS = {
     red: { name: "Red", hex: "#ff3b4e" },
@@ -111,7 +111,6 @@
    */
   let audioCtx = null;
   let soundBuffers = null;
-  let mediaUnlockEl = null;
   let htmlUrls = null;
   const htmlPlayers = {
     draw: [null, null],
@@ -269,46 +268,37 @@
     return htmlUrls;
   }
 
-  function kickMediaSession() {
-    try {
-      if (!mediaUnlockEl) {
-        mediaUnlockEl = new Audio(
-          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
-        );
-        mediaUnlockEl.setAttribute("playsinline", "true");
-        mediaUnlockEl.volume = 0.01;
-      }
-      const p = mediaUnlockEl.play();
-      if (p && typeof p.then === "function") {
-        p.then(() => {
-          try {
-            mediaUnlockEl.pause();
-            mediaUnlockEl.currentTime = 0;
-          } catch (_) {
-            /* ignore */
-          }
-        }).catch(() => {});
-      }
-    } catch (_) {
-      /* ignore */
-    }
-  }
-
-  function playWebSound(kind) {
-    const ctx = resumeAudioContext();
-    if (!ctx) return false;
+  function startBuffer(kind, ctx) {
     const buffers = ensureSoundBuffers();
     const buffer = buffers && buffers[kind];
     if (!buffer) return false;
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.9;
+    src.buffer = buffer;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    // Use currentTime — start(0) is unreliable after the context has been running on iOS 15.
+    src.start(ctx.currentTime);
+    return true;
+  }
+
+  /**
+   * iOS 15 often leaves AudioContext suspended after the first chime unless
+   * resume() is awaited inside the tap handler. Also avoid HTML unlock/pause
+   * tricks — pausing HTML audio was suspending Web Audio after draw #1.
+   */
+  async function playWebSound(kind) {
+    const ctx = getAudioContext();
+    if (!ctx) return false;
     try {
-      const src = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      gain.gain.value = 0.9;
-      src.buffer = buffer;
-      src.connect(gain);
-      gain.connect(ctx.destination);
-      src.start(0);
-      return true;
+      if (ctx.state === "suspended" || ctx.state === "interrupted") {
+        await ctx.resume();
+      }
+      if (ctx.state !== "running") {
+        return false;
+      }
+      return startBuffer(kind, ctx);
     } catch (_) {
       return false;
     }
@@ -348,28 +338,27 @@
 
   function armSoundPlayers() {
     resumeAudioContext();
-    kickMediaSession();
     ensureSoundBuffers();
     ensureHtmlUrls();
   }
 
-  function playSound(kind) {
-    // Prefer Web Audio on older iPhones; HTML is backup only.
-    if (!playWebSound(kind)) {
+  async function playSound(kind) {
+    const played = await playWebSound(kind);
+    if (!played) {
       playHtmlSound(kind);
     }
   }
 
   function playDrawChime() {
-    playSound("draw");
+    return playSound("draw");
   }
 
   function playEmptyChime() {
-    playSound("empty");
+    return playSound("empty");
   }
 
   function playTreatSound() {
-    playSound("treat");
+    return playSound("treat");
   }
 
   function buildDeck(type) {
@@ -518,10 +507,10 @@
     els.deckSelect.value = state.deckType;
   }
 
-  function drawCard() {
+  async function drawCard() {
     if (!state.deck.length) {
-      playEmptyChime();
       showToast("No cards left — ask a grown-up to Reset.");
+      await playEmptyChime();
       return;
     }
 
@@ -540,13 +529,15 @@
     updateChrome();
     save();
 
+    // Await resume()+start inside this tap so iOS 15 keeps Web Audio alive
+    // for every draw, not just the first.
     if (!state.deck.length) {
-      playEmptyChime();
       showToast("Last card! Ask a grown-up to Reset.");
+      await playEmptyChime();
     } else if (card.kind === "treat") {
-      playTreatSound();
+      await playTreatSound();
     } else {
-      playDrawChime();
+      await playDrawChime();
     }
   }
 
