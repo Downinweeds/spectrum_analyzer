@@ -2,7 +2,7 @@
   "use strict";
 
   /** Bump this on every Candyland release so phones show the loaded build. */
-  const APP_REV = 12;
+  const APP_REV = 13;
 
   const COLORS = {
     red: { name: "Red", hex: "#ff3b4e" },
@@ -104,24 +104,120 @@
   };
 
   /**
-   * Play chimes with HTMLAudioElement + WAV blobs (media playback).
-   * iPhone Silent mode mutes many Web Audio beeps, but media audio
-   * (same path as audiobooks) still plays. Never await play().
+   * SE / 6s (iOS 15) drop HTMLAudio play() randomly. Web Audio BufferSource
+   * start() is reliable for short SFX. Build PCM buffers once, then on each
+   * DRAW create a fresh BufferSource (cheap) — no pause/seek races.
+   * A silent HTMLAudio kick (never awaited) helps Silent-mode media session.
    */
-  const SAMPLE_RATE = 22050;
-  let soundUrls = null;
-  /**
-   * Two players per sound (ping-pong). Reusing one Audio and pause/seek/play
-   * is flaky on iOS 15; alternating avoids that without allocating every draw.
-   * Always call play() directly from the tap handler (no setTimeout) or iOS
-   * drops the user-gesture and sound fails ~randomly.
-   */
-  const soundPlayers = {
+  let audioCtx = null;
+  let soundBuffers = null;
+  let mediaUnlockEl = null;
+  let htmlUrls = null;
+  const htmlPlayers = {
     draw: [null, null],
     empty: [null, null],
     treat: [null, null],
   };
-  const soundSlot = { draw: 0, empty: 0, treat: 0 };
+  const htmlSlot = { draw: 0, empty: 0, treat: 0 };
+
+  function getAudioContext() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!audioCtx) {
+      try {
+        audioCtx = new AC();
+      } catch (_) {
+        return null;
+      }
+    }
+    return audioCtx;
+  }
+
+  function resumeAudioContext() {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+    if (ctx.state === "suspended") {
+      try {
+        const p = ctx.resume();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    return ctx;
+  }
+
+  function mixTone(samples, sampleRate, freq, startSec, durSec, amp, waveType) {
+    const start = Math.floor(startSec * sampleRate);
+    const n = Math.floor(durSec * sampleRate);
+    const attack = 0.02;
+    const release = Math.min(0.22, durSec * 0.45);
+    for (let i = 0; i < n; i += 1) {
+      const t = i / sampleRate;
+      let gain = amp;
+      if (t < attack) gain *= t / attack;
+      else if (t > durSec - release) gain *= Math.max(0, (durSec - t) / release);
+      let wave = Math.sin(2 * Math.PI * freq * t);
+      if (waveType === "triangle") {
+        const x = (freq * t) % 1;
+        wave = 4 * Math.abs(x - 0.5) - 1;
+      }
+      const idx = start + i;
+      if (idx < samples.length) samples[idx] += wave * gain;
+    }
+  }
+
+  function normalizeSamples(samples) {
+    let peak = 0.001;
+    for (let i = 0; i < samples.length; i += 1) {
+      peak = Math.max(peak, Math.abs(samples[i]));
+    }
+    const norm = Math.min(1, 0.92 / peak);
+    for (let i = 0; i < samples.length; i += 1) samples[i] *= norm;
+  }
+
+  function fillClip(samples, sampleRate, kind) {
+    if (kind === "draw") {
+      mixTone(samples, sampleRate, 1046.5, 0, 0.45, 0.55);
+      mixTone(samples, sampleRate, 1568, 0.06, 0.5, 0.35);
+      mixTone(samples, sampleRate, 2093, 0.1, 0.35, 0.2);
+    } else if (kind === "empty") {
+      mixTone(samples, sampleRate, 880, 0, 0.35, 0.5);
+      mixTone(samples, sampleRate, 1318.5, 0.07, 0.4, 0.32);
+      mixTone(samples, sampleRate, 880, 0.42, 0.35, 0.5);
+      mixTone(samples, sampleRate, 1318.5, 0.5, 0.45, 0.32);
+    } else {
+      mixTone(samples, sampleRate, 523.25, 0, 0.22, 0.42, "triangle");
+      mixTone(samples, sampleRate, 659.25, 0.1, 0.22, 0.42, "triangle");
+      mixTone(samples, sampleRate, 783.99, 0.2, 0.24, 0.42, "triangle");
+      mixTone(samples, sampleRate, 1046.5, 0.32, 0.5, 0.48);
+      mixTone(samples, sampleRate, 1568, 0.4, 0.45, 0.28);
+    }
+    normalizeSamples(samples);
+  }
+
+  function clipDuration(kind) {
+    if (kind === "empty") return 0.95;
+    if (kind === "treat") return 0.85;
+    return 0.55;
+  }
+
+  function ensureSoundBuffers() {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+    if (soundBuffers) return soundBuffers;
+    const rate = ctx.sampleRate || 44100;
+    soundBuffers = {};
+    ["draw", "empty", "treat"].forEach((kind) => {
+      const n = Math.ceil(clipDuration(kind) * rate);
+      const samples = new Float32Array(n);
+      fillClip(samples, rate, kind);
+      const buffer = ctx.createBuffer(1, n, rate);
+      buffer.getChannelData(0).set(samples);
+      soundBuffers[kind] = buffer;
+    });
+    return soundBuffers;
+  }
 
   function writeAscii(view, offset, text) {
     for (let i = 0; i < text.length; i += 1) {
@@ -129,7 +225,7 @@
     }
   }
 
-  function samplesToWavUrl(samples) {
+  function samplesToWavDataUri(samples, sampleRate) {
     const bytes = samples.length * 2;
     const buffer = new ArrayBuffer(44 + bytes);
     const view = new DataView(buffer);
@@ -140,8 +236,8 @@
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
     view.setUint16(22, 1, true);
-    view.setUint32(24, SAMPLE_RATE, true);
-    view.setUint32(28, SAMPLE_RATE * 2, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
     view.setUint16(32, 2, true);
     view.setUint16(34, 16, true);
     writeAscii(view, 36, "data");
@@ -152,99 +248,87 @@
       view.setInt16(o, clipped < 0 ? clipped * 0x8000 : clipped * 0x7fff, true);
       o += 2;
     }
-    return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
-  }
-
-  function mixTone(samples, freq, startSec, durSec, amp, waveType) {
-    const start = Math.floor(startSec * SAMPLE_RATE);
-    const n = Math.floor(durSec * SAMPLE_RATE);
-    const attack = 0.02;
-    const release = Math.min(0.22, durSec * 0.45);
-    for (let i = 0; i < n; i += 1) {
-      const t = i / SAMPLE_RATE;
-      let gain = amp;
-      if (t < attack) gain *= t / attack;
-      else if (t > durSec - release) gain *= Math.max(0, (durSec - t) / release);
-      const phase = 2 * Math.PI * freq * t;
-      let wave = Math.sin(phase);
-      if (waveType === "triangle") {
-        const x = (freq * t) % 1;
-        wave = 4 * Math.abs(x - 0.5) - 1;
-      }
-      const idx = start + i;
-      if (idx < samples.length) samples[idx] += wave * gain;
+    const u8 = new Uint8Array(buffer);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < u8.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
     }
+    return "data:audio/wav;base64," + btoa(binary);
   }
 
-  function renderClip(durationSec, buildFn) {
-    const samples = new Float32Array(Math.ceil(durationSec * SAMPLE_RATE));
-    buildFn(samples);
-    let peak = 0.001;
-    for (let i = 0; i < samples.length; i += 1) {
-      peak = Math.max(peak, Math.abs(samples[i]));
-    }
-    const norm = Math.min(1, 0.92 / peak);
-    for (let i = 0; i < samples.length; i += 1) samples[i] *= norm;
-    return samplesToWavUrl(samples);
-  }
-
-  function ensureSounds() {
-    if (soundUrls) return soundUrls;
-    soundUrls = {
-      draw: renderClip(0.55, (s) => {
-        mixTone(s, 1046.5, 0, 0.45, 0.55);
-        mixTone(s, 1568, 0.06, 0.5, 0.35);
-        mixTone(s, 2093, 0.1, 0.35, 0.2);
-      }),
-      empty: renderClip(0.95, (s) => {
-        mixTone(s, 880, 0, 0.35, 0.5);
-        mixTone(s, 1318.5, 0.07, 0.4, 0.32);
-        mixTone(s, 880, 0.42, 0.35, 0.5);
-        mixTone(s, 1318.5, 0.5, 0.45, 0.32);
-      }),
-      treat: renderClip(0.85, (s) => {
-        mixTone(s, 523.25, 0, 0.22, 0.42, "triangle");
-        mixTone(s, 659.25, 0.1, 0.22, 0.42, "triangle");
-        mixTone(s, 783.99, 0.2, 0.24, 0.42, "triangle");
-        mixTone(s, 1046.5, 0.32, 0.5, 0.48);
-        mixTone(s, 1568, 0.4, 0.45, 0.28);
-      }),
-    };
-    return soundUrls;
-  }
-
-  function createPlayer(kind) {
-    const url = ensureSounds()[kind];
-    if (!url) return null;
-    const audio = new Audio(url);
-    audio.setAttribute("playsinline", "true");
-    audio.preload = "auto";
-    audio.volume = 1;
-    return audio;
-  }
-
-  function nextPlayer(kind) {
-    const slot = soundSlot[kind];
-    soundSlot[kind] = slot ^ 1;
-    if (!soundPlayers[kind][slot]) {
-      soundPlayers[kind][slot] = createPlayer(kind);
-    }
-    return { audio: soundPlayers[kind][slot], slot };
-  }
-
-  function armSoundPlayers() {
-    ensureSounds();
+  function ensureHtmlUrls() {
+    if (htmlUrls) return htmlUrls;
+    const rate = 22050;
+    htmlUrls = {};
     ["draw", "empty", "treat"].forEach((kind) => {
-      soundPlayers[kind][0] = soundPlayers[kind][0] || createPlayer(kind);
-      soundPlayers[kind][1] = soundPlayers[kind][1] || createPlayer(kind);
+      const samples = new Float32Array(Math.ceil(clipDuration(kind) * rate));
+      fillClip(samples, rate, kind);
+      htmlUrls[kind] = samplesToWavDataUri(samples, rate);
     });
+    return htmlUrls;
   }
 
-  function playSound(kind) {
+  function kickMediaSession() {
     try {
-      const picked = nextPlayer(kind);
-      const audio = picked.audio;
-      if (!audio) return;
+      if (!mediaUnlockEl) {
+        mediaUnlockEl = new Audio(
+          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
+        );
+        mediaUnlockEl.setAttribute("playsinline", "true");
+        mediaUnlockEl.volume = 0.01;
+      }
+      const p = mediaUnlockEl.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          try {
+            mediaUnlockEl.pause();
+            mediaUnlockEl.currentTime = 0;
+          } catch (_) {
+            /* ignore */
+          }
+        }).catch(() => {});
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playWebSound(kind) {
+    const ctx = resumeAudioContext();
+    if (!ctx) return false;
+    const buffers = ensureSoundBuffers();
+    const buffer = buffers && buffers[kind];
+    if (!buffer) return false;
+    try {
+      const src = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.9;
+      src.buffer = buffer;
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(0);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function playHtmlSound(kind) {
+    try {
+      const urls = ensureHtmlUrls();
+      const url = urls[kind];
+      if (!url) return;
+      const slot = htmlSlot[kind];
+      htmlSlot[kind] = slot ^ 1;
+      if (!htmlPlayers[kind][slot]) {
+        const audio = new Audio(url);
+        audio.setAttribute("playsinline", "true");
+        audio.preload = "auto";
+        audio.volume = 1;
+        htmlPlayers[kind][slot] = audio;
+      }
+      const audio = htmlPlayers[kind][slot];
       try {
         if (!audio.paused) audio.pause();
       } catch (_) {
@@ -253,25 +337,26 @@
       try {
         audio.currentTime = 0;
       } catch (_) {
-        /* ignore seek errors on cold start */
+        /* ignore */
       }
       const result = audio.play();
-      if (result && typeof result.catch === "function") {
-        result.catch(() => {
-          soundPlayers[kind][picked.slot] = createPlayer(kind);
-          const retry = soundPlayers[kind][picked.slot];
-          if (!retry) return;
-          try {
-            retry.currentTime = 0;
-          } catch (_) {
-            /* ignore */
-          }
-          const again = retry.play();
-          if (again && typeof again.catch === "function") again.catch(() => {});
-        });
-      }
+      if (result && typeof result.catch === "function") result.catch(() => {});
     } catch (_) {
-      /* never block drawing on sound errors */
+      /* ignore */
+    }
+  }
+
+  function armSoundPlayers() {
+    resumeAudioContext();
+    kickMediaSession();
+    ensureSoundBuffers();
+    ensureHtmlUrls();
+  }
+
+  function playSound(kind) {
+    // Prefer Web Audio on older iPhones; HTML is backup only.
+    if (!playWebSound(kind)) {
+      playHtmlSound(kind);
     }
   }
 
