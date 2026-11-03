@@ -107,6 +107,8 @@
    */
   const SAMPLE_RATE = 22050;
   let soundUrls = null;
+  /** Reused players — creating a new Audio() every draw exhausts iOS 15. */
+  const soundPlayers = { draw: null, empty: null, treat: null };
 
   function writeAscii(view, offset, text) {
     for (let i = 0; i < text.length; i += 1) {
@@ -198,30 +200,84 @@
     return soundUrls;
   }
 
+  function createPlayer(kind) {
+    const url = ensureSounds()[kind];
+    if (!url) return null;
+    const audio = new Audio(url);
+    audio.setAttribute("playsinline", "true");
+    audio.preload = "auto";
+    audio.volume = 1;
+    return audio;
+  }
+
+  function getPlayer(kind) {
+    if (!soundPlayers[kind]) {
+      soundPlayers[kind] = createPlayer(kind);
+    }
+    return soundPlayers[kind];
+  }
+
+  function armSoundPlayers() {
+    ensureSounds();
+    ["draw", "empty", "treat"].forEach((kind) => {
+      getPlayer(kind);
+    });
+  }
+
+  function restartPlayer(audio) {
+    try {
+      audio.pause();
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      audio.currentTime = 0;
+    } catch (_) {
+      try {
+        audio.load();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
   function playSound(kind) {
     try {
-      const url = ensureSounds()[kind];
-      if (!url) return;
-      const audio = new Audio(url);
-      audio.setAttribute("playsinline", "true");
-      audio.volume = 1;
+      let audio = getPlayer(kind);
+      if (!audio) return;
+      restartPlayer(audio);
       const result = audio.play();
-      if (result && typeof result.catch === "function") result.catch(() => {});
+      if (result && typeof result.then === "function") {
+        result.catch(() => {
+          // iOS can invalidate a player after many plays — rebuild once.
+          soundPlayers[kind] = null;
+          audio = getPlayer(kind);
+          if (!audio) return;
+          restartPlayer(audio);
+          const retry = audio.play();
+          if (retry && typeof retry.catch === "function") retry.catch(() => {});
+        });
+      }
     } catch (_) {
       /* never block drawing on sound errors */
     }
   }
 
+  /** Run after the card paints so a slow audio path can't freeze DRAW. */
+  function playSoundSoon(kind) {
+    setTimeout(() => playSound(kind), 0);
+  }
+
   function playDrawChime() {
-    playSound("draw");
+    playSoundSoon("draw");
   }
 
   function playEmptyChime() {
-    playSound("empty");
+    playSoundSoon("empty");
   }
 
   function playTreatSound() {
-    playSound("treat");
+    playSoundSoon("treat");
   }
 
   function buildDeck(type) {
@@ -371,9 +427,6 @@
   }
 
   function drawCard() {
-    // Build WAV urls early (sync, fast). Playback is fire-and-forget HTMLAudio.
-    ensureSounds();
-
     if (!state.deck.length) {
       playEmptyChime();
       showToast("No cards left — ask a grown-up to Reset.");
@@ -463,9 +516,9 @@
       }
     }
 
-    // Prebuild chime WAVs on first touch so DRAW stays snappy.
+    // Prebuild WAV blobs + reusable Audio players on first touch.
     const armAudio = () => {
-      ensureSounds();
+      armSoundPlayers();
     };
     document.addEventListener("pointerdown", armAudio, { once: true, passive: true });
     document.addEventListener("touchstart", armAudio, { once: true, passive: true });
